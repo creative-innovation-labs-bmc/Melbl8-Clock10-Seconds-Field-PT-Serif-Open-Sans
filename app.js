@@ -4,20 +4,25 @@
   const STAGE_W = 3840;
   const STAGE_H = 804;
   const TIMEZONE = 'Australia/Melbourne';
+  const COLS = 12;
+  const ROWS = 5;
+  const TOTAL = COLS * ROWS;
+
   const VARIANTS = {
-    a: 'STAIR FIELD',
-    b: 'EQUAL STEMS',
-    c: 'CENTRE PULSE',
-    d: 'WAVE FIELD'
+    a: 'MOSAIC SCAN',
+    b: 'COLUMN BUILD',
+    c: 'CENTRE OUT',
+    d: 'DIAGONAL SWEEP'
   };
 
   const viewport = document.getElementById('viewport');
   const stage = document.getElementById('stage');
   const timeEl = document.getElementById('time');
   const dateEl = document.getElementById('date');
+  const weekdayEl = document.getElementById('weekday');
   const secondReadout = document.getElementById('secondReadout');
   const variantName = document.getElementById('variantName');
-  const field = document.getElementById('secondsField');
+  const revealGrid = document.getElementById('revealGrid');
 
   const requestedVariant = new URLSearchParams(window.location.search).get('variant');
   const variant = requestedVariant && VARIANTS[requestedVariant.toLowerCase()]
@@ -35,47 +40,88 @@
     hourCycle: 'h23'
   });
 
+  const weekdayFormatter = new Intl.DateTimeFormat('en-AU', {
+    timeZone: TIMEZONE,
+    weekday: 'long'
+  });
+
   const dateFormatter = new Intl.DateTimeFormat('en-AU', {
     timeZone: TIMEZONE,
-    weekday: 'long',
     day: '2-digit',
     month: 'long',
     year: 'numeric'
   });
 
-  const ticks = [];
+  const tiles = [];
+  let revealOrder = [];
   let lastSecond = -1;
-  let lastDateKey = '';
+  let lastDay = '';
   let timer = 0;
-  let pulseTimer = 0;
 
-  function buildField() {
+  function buildTiles() {
     const fragment = document.createDocumentFragment();
-    let globalIndex = 0;
 
-    for (let groupIndex = 0; groupIndex < 6; groupIndex += 1) {
-      const group = document.createElement('div');
-      group.className = 'second-group';
-
-      for (let itemIndex = 0; itemIndex < 10; itemIndex += 1) {
-        const tick = document.createElement('div');
-        tick.className = 'tick';
-        tick.style.setProperty('--level', String(itemIndex));
-
-        const wave = (Math.sin((globalIndex / 59) * Math.PI * 4 - Math.PI / 2) + 1) / 2;
-        const waveHeight = Math.round(145 + wave * 300);
-        tick.style.setProperty('--wave-h', `${waveHeight}px`);
-
-        tick.setAttribute('aria-hidden', 'true');
-        group.appendChild(tick);
-        ticks.push(tick);
-        globalIndex += 1;
-      }
-
-      fragment.appendChild(group);
+    for (let i = 0; i < TOTAL; i += 1) {
+      const tile = document.createElement('div');
+      tile.className = 'reveal-tile';
+      tile.dataset.index = String(i);
+      fragment.appendChild(tile);
+      tiles.push(tile);
     }
 
-    field.appendChild(fragment);
+    revealGrid.appendChild(fragment);
+  }
+
+  function gridPoint(index) {
+    return {
+      x: index % COLS,
+      y: Math.floor(index / COLS),
+      index
+    };
+  }
+
+  function makeRevealOrder(mode) {
+    const points = Array.from({ length: TOTAL }, (_, index) => gridPoint(index));
+
+    if (mode === 'a') {
+      const order = [];
+      for (let y = 0; y < ROWS; y += 1) {
+        if (y % 2 === 0) {
+          for (let x = 0; x < COLS; x += 1) order.push(y * COLS + x);
+        } else {
+          for (let x = COLS - 1; x >= 0; x -= 1) order.push(y * COLS + x);
+        }
+      }
+      return order;
+    }
+
+    if (mode === 'b') {
+      points.sort((p1, p2) => {
+        if (p1.x !== p2.x) return p1.x - p2.x;
+        return p2.y - p1.y;
+      });
+      return points.map(point => point.index);
+    }
+
+    if (mode === 'c') {
+      const cx = (COLS - 1) / 2;
+      const cy = (ROWS - 1) / 2;
+      points.sort((p1, p2) => {
+        const d1 = Math.hypot(p1.x - cx, p1.y - cy);
+        const d2 = Math.hypot(p2.x - cx, p2.y - cy);
+        if (d1 !== d2) return d1 - d2;
+        return p1.index - p2.index;
+      });
+      return points.map(point => point.index);
+    }
+
+    points.sort((p1, p2) => {
+      const diagonal1 = p1.x + p1.y;
+      const diagonal2 = p2.x + p2.y;
+      if (diagonal1 !== diagonal2) return diagonal1 - diagonal2;
+      return p2.y - p1.y;
+    });
+    return points.map(point => point.index);
   }
 
   function getMelbourneParts(date) {
@@ -99,70 +145,97 @@
     };
   }
 
-  function pulseCurrent(tick) {
-    if (variant !== 'c' || !tick) return;
+  function fitWeekday() {
+    let low = 180;
+    let high = 620;
+    const maxWidth = 3490;
+    const maxHeight = 490;
 
-    window.clearTimeout(pulseTimer);
-    tick.classList.remove('pulse');
-    void tick.offsetWidth;
-    tick.classList.add('pulse');
+    while (high - low > 2) {
+      const mid = Math.floor((low + high) / 2);
+      weekdayEl.style.fontSize = `${mid}px`;
 
-    pulseTimer = window.setTimeout(() => {
-      tick.classList.remove('pulse');
-    }, 260);
-  }
-
-  function renderInitialField(second) {
-    for (let i = 0; i < ticks.length; i += 1) {
-      ticks[i].classList.remove('past', 'current', 'pulse');
-      if (i < second) ticks[i].classList.add('past');
-      if (i === second) ticks[i].classList.add('current');
+      if (weekdayEl.scrollWidth <= maxWidth && weekdayEl.scrollHeight <= maxHeight) {
+        low = mid;
+      } else {
+        high = mid;
+      }
     }
-    pulseCurrent(ticks[second]);
+
+    weekdayEl.style.fontSize = `${low}px`;
   }
 
-  function advanceField(second) {
+  function resetGrid() {
+    for (let i = 0; i < tiles.length; i += 1) {
+      tiles[i].classList.remove('revealed', 'current');
+    }
+  }
+
+  function setRevealState(second, instant) {
+    const count = Math.min(TOTAL, second + 1);
+
+    if (instant) revealGrid.classList.add('instant');
+
+    for (let i = 0; i < TOTAL; i += 1) {
+      const tile = tiles[revealOrder[i]];
+      tile.classList.remove('current');
+      if (i < count) tile.classList.add('revealed');
+      else tile.classList.remove('revealed');
+    }
+
+    if (instant) {
+      void revealGrid.offsetWidth;
+      revealGrid.classList.remove('instant');
+    }
+  }
+
+  function advanceReveal(second) {
     if (lastSecond < 0) {
-      renderInitialField(second);
+      setRevealState(second, true);
       return;
     }
 
     if (second === 0 || second < lastSecond) {
-      for (let i = 0; i < ticks.length; i += 1) {
-        ticks[i].classList.remove('past', 'current', 'pulse');
-      }
-      ticks[0].classList.add('current');
-      pulseCurrent(ticks[0]);
+      resetGrid();
+      const firstTile = tiles[revealOrder[0]];
+      firstTile.classList.add('current');
+      window.setTimeout(() => {
+        firstTile.classList.remove('current');
+        firstTile.classList.add('revealed');
+      }, 90);
       return;
     }
 
-    if (lastSecond >= 0 && lastSecond < ticks.length) {
-      ticks[lastSecond].classList.remove('current', 'pulse');
-      ticks[lastSecond].classList.add('past');
-    }
+    const tile = tiles[revealOrder[second]];
+    if (!tile) return;
 
-    if (second >= 0 && second < ticks.length) {
-      ticks[second].classList.remove('past');
-      ticks[second].classList.add('current');
-      pulseCurrent(ticks[second]);
-    }
+    tile.classList.add('current');
+    window.setTimeout(() => {
+      tile.classList.remove('current');
+      tile.classList.add('revealed');
+    }, 90);
+  }
+
+  function updateDay(now) {
+    const weekday = weekdayFormatter.format(now).toUpperCase();
+    if (weekday === lastDay) return;
+
+    weekdayEl.textContent = weekday;
+    dateEl.textContent = dateFormatter.format(now).toUpperCase();
+    lastDay = weekday;
+
+    window.requestAnimationFrame(fitWeekday);
   }
 
   function renderClock() {
     const now = new Date();
     const parts = getMelbourneParts(now);
-    const fullTime = `${parts.hour}:${parts.minute}:${parts.second}`;
-    const dateKey = `${parts.hour}:${parts.minute}:${dateFormatter.format(now)}`;
 
-    timeEl.textContent = fullTime;
-
-    if (dateKey !== lastDateKey) {
-      dateEl.textContent = dateFormatter.format(now).toUpperCase();
-      lastDateKey = dateKey;
-    }
+    timeEl.textContent = `${parts.hour}:${parts.minute}:${parts.second}`;
+    updateDay(now);
 
     if (parts.secondNumber !== lastSecond) {
-      advanceField(parts.secondNumber);
+      advanceReveal(parts.secondNumber);
       secondReadout.textContent = `${parts.second} / 60`;
       lastSecond = parts.secondNumber;
     }
@@ -184,7 +257,8 @@
     stage.style.transform = `scale(${scale})`;
   }
 
-  buildField();
+  buildTiles();
+  revealOrder = makeRevealOrder(variant);
   scaleStage();
   renderClock();
 
