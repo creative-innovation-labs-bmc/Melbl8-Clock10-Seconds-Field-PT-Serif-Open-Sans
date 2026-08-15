@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <title>Clock 10 Variant Preview</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#1c1b1c;color:#fff;font-family:Arial,sans-serif}body{padding:24px}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}.toolbar strong{margin-right:8px}.toolbar button{border:1px solid #66706d;background:#373a36;color:#fff;padding:10px 14px;border-radius:999px;cursor:pointer}.toolbar button.active{background:#89c925;color:#1c1b1c;border-color:#89c925}.frame-wrap{width:100%;aspect-ratio:3840/804;background:#000;overflow:hidden;border:1px solid #4e5859}.frame-wrap iframe{width:100%;height:100%;border:0;display:block}.note{margin-top:12px;color:#bbc6c3;font-size:13px;line-height:1.5}.links{margin-top:14px;display:flex;gap:14px;flex-wrap:wrap}.links a{color:#89c925;text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="toolbar" aria-label="Clock variant selector">
+    <strong>Clock 10 variants</strong>
+    <button data-variant="a" class="active">A · Stair Field</button>
+    <button data-variant="b">B · Equal Stems</button>
+    <button data-variant="c">C · Centre Pulse</button>
+    <button data-variant="d">D · Wave Field</button>
+  </div>
+
+  <div class="frame-wrap">
+    <iframe id="clockFrame" src="./?variant=a" title="Clock 10 variant preview"></iframe>
+  </div>
+
+  <div class="note">The production root remains Variant A. The variant query is only for design comparison and does not need to be used in Enplug.</div>
+  <div class="links">
+    <a href="./" target="_blank" rel="noopener">Open production root</a>
+    <a href="./?variant=a" target="_blank" rel="noopener">A full screen</a>
+    <a href="./?variant=b" target="_blank" rel="noopener">B full screen</a>
+    <a href="./?variant=c" target="_blank" rel="noopener">C full screen</a>
+    <a href="./?variant=d" target="_blank" rel="noopener">D full screen</a>
+  </div>
+
+  <script>
+    const frame=document.getElementById('clockFrame');
+    const buttons=[...document.querySelectorAll('button[data-variant]')];
+    buttons.forEach(button=>button.addEventListener('click',()=>{
+      buttons.forEach(item=>item.classList.remove('active'));
+      button.classList.add('active');
+      frame.src=`./?variant=${button.dataset.variant}`;
+    }));
+  </script>
+</body>
+</html>
