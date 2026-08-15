@@ -107,8 +107,12 @@
       const cx = (COLS - 1) / 2;
       const cy = (ROWS - 1) / 2;
       points.sort((p1, p2) => {
-        const d1 = Math.hypot(p1.x - cx, p1.y - cy);
-        const d2 = Math.hypot(p2.x - cx, p2.y - cy);
+        const dx1 = p1.x - cx;
+        const dy1 = p1.y - cy;
+        const dx2 = p2.x - cx;
+        const dy2 = p2.y - cy;
+        const d1 = (dx1 * dx1) + (dy1 * dy1);
+        const d2 = (dx2 * dx2) + (dy2 * dy2);
         if (d1 !== d2) return d1 - d2;
         return p1.index - p2.index;
       });
@@ -145,21 +149,27 @@
     };
   }
 
+  function measureWeekday() {
+    const range = document.createRange();
+    range.selectNodeContents(weekdayEl);
+    const rect = range.getBoundingClientRect();
+    if (typeof range.detach === 'function') range.detach();
+    return rect;
+  }
+
   function fitWeekday() {
     let low = 180;
     let high = 620;
     const maxWidth = 3490;
-    const maxHeight = 490;
+    const maxHeight = 455;
 
     while (high - low > 2) {
       const mid = Math.floor((low + high) / 2);
       weekdayEl.style.fontSize = `${mid}px`;
+      const rect = measureWeekday();
 
-      if (weekdayEl.scrollWidth <= maxWidth && weekdayEl.scrollHeight <= maxHeight) {
-        low = mid;
-      } else {
-        high = mid;
-      }
+      if (rect.width <= maxWidth && rect.height <= maxHeight) low = mid;
+      else high = mid;
     }
 
     weekdayEl.style.fontSize = `${low}px`;
