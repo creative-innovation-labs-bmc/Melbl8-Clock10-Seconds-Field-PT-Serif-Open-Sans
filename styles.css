@@ -143,6 +143,10 @@ body {
   contain: layout paint style;
 }
 
+.reveal-grid.instant .reveal-tile {
+  transition: none !important;
+}
+
 .reveal-tile.current {
   background: var(--green);
   outline-color: rgba(255,255,255,.75);
@@ -153,7 +157,7 @@ body {
   opacity: 0;
 }
 
-/* B: taller, denser modules with a vertical shutter feel. */
+/* B: dense vertical shutter build. */
 #stage[data-variant="b"] .reveal-panel {
   background: var(--green);
 }
@@ -177,7 +181,7 @@ body {
   transform: translate3d(0,0,0) scaleY(.01);
 }
 
-/* C: centre-out version with a serif day and larger gallery gutters. */
+/* C: centre-out serif version with larger gallery gutters. */
 #stage[data-variant="c"] .weekday {
   font-family: "PT Serif Local", Georgia, serif;
   font-weight: 700;
