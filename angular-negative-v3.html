@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
+  <title>Angular Negative Space Clock v3</title>
+  <style>
+    :root{
+      --void:#1c1b1c;
+      --green:#89c925;
+      --white:#f5f7f6;
+      --grey1:#dce1de;
+      --grey2:#c2c9c5;
+      --grey3:#969e9a;
+      --grey4:#4e5859;
+      --stage-w:3840px;
+      --stage-h:804px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
+    #viewport{position:fixed;inset:0;overflow:hidden;background:#000}
+    #stage{
+      position:absolute;left:0;top:0;width:var(--stage-w);height:var(--stage-h);
+      overflow:hidden;transform-origin:0 0;background:var(--void);
+      contain:layout paint style;
+    }
+    .row{position:absolute;left:0;width:3840px;height:50.25px;overflow:hidden}
+    .tile{
+      --cut:22px;
+      position:absolute;top:3px;height:44px;min-width:26px;
+      box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);
+      transition:transform 340ms cubic-bezier(.22,.72,.18,1),width 340ms cubic-bezier(.22,.72,.18,1);
+      will-change:transform,width;
+      transform-origin:left center;
+    }
+    .tone0{background:var(--white)}
+    .tone1{background:var(--grey1)}
+    .tone2{background:var(--grey2)}
+    .tone3{background:var(--grey3)}
+    .tone4{background:var(--grey4)}
+    .tone5{background:var(--green)}
+
+    .shape0{clip-path:none}
+    .shape1{clip-path:polygon(var(--cut) 0,100% 0,100% 100%,0 100%,0 var(--cut))}
+    .shape2{clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+    .shape3{clip-path:polygon(var(--cut) 0,100% 0,100% 100%,var(--cut) 100%,0 calc(100% - var(--cut)),0 var(--cut))}
+    .shape4{clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% calc(100% - var(--cut)),calc(100% - var(--cut)) 100%,0 100%)}
+    .shape5{clip-path:polygon(var(--cut) 0,calc(100% - var(--cut)) 0,100% var(--cut),100% calc(100% - var(--cut)),calc(100% - var(--cut)) 100%,var(--cut) 100%,0 calc(100% - var(--cut)),0 var(--cut))}
+
+    @media (prefers-reduced-motion:reduce){.tile{transition-duration:1ms}}
+  </style>
+</head>
+<body>
+<div id="viewport"><div id="stage"></div></div>
+<script>
+(() => {
+  'use strict';
+
+  const SW=3840, SH=804, TZ='Australia/Melbourne';
+  const ROWS=16, COLS=76, MODULES=20, GAP_COLS=2, OUTER_COLS=5;
+  const ROW_H=SH/ROWS, CELL_W=SW/COLS, TILE_GAP=5;
+
+  const stage=document.getElementById('stage');
+  const viewport=document.getElementById('viewport');
+  const params=new URLSearchParams(location.search);
+  const demo=params.get('demo')==='1';
+  const forced=params.get('time');
+
+  const fmt=new Intl.DateTimeFormat('en-AU',{
+    timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
+  });
+
+  const DIGITS={
+    '0':['00111100','01111110','11100111','11000011','11000011','11000011','11000011','11000011','11000011','11100111','01111110','00111100'],
+    '1':['00011000','00111000','01111000','00011000','00011000','00011000','00011000','00011000','00011000','00011000','01111110','01111110'],
+    '2':['00111100','01111110','11000011','00000011','00000011','00000110','00011100','00110000','01100000','11000000','11111111','11111111'],
+    '3':['00111100','01111110','11000011','00000011','00000011','00011110','00011110','00000011','00000011','11000011','01111110','00111100'],
+    '4':['00000110','00001110','00011110','00110110','01100110','11000110','11000110','11111111','11111111','00000110','00000110','00000110'],
+    '5':['11111111','11111111','11000000','11000000','11111100','11111110','00000011','00000011','00000011','11000011','01111110','00111100'],
+    '6':['00111100','01111110','11000011','11000000','11000000','11111100','11111110','11000011','11000011','11000011','01111110','00111100'],
+    '7':['11111111','11111111','00000011','00000110','00000110','00001100','00011000','00110000','00110000','00110000','00110000','00110000'],
+    '8':['00111100','01111110','11000011','11000011','11000011','01111110','01111110','11000011','11000011','11000011','01111110','00111100'],
+    '9':['00111100','01111110','11000011','11000011','11000011','01111111','00111111','00000011','00000011','11000011','01111110','00111100']
+  };
+  const COLON=['00','00','00','11','11','00','00','11','11','00','00','00'];
+  const SLOT_WIDTHS=[8,8,2,8,8,2,8,8];
+
+  const rowObjects=[];
+  let lastValue='';
+  let demoValue='14:37:52';
+  let timer=0;
+
+  function toneFor(row,index){
+    const n=(row*13+index*7)%20;
+    if(n===0||n===11) return 5;
+    if(n<5) return 0;
+    if(n<10) return 1;
+    if(n<14) return 2;
+    if(n<18) return 3;
+    return 4;
+  }
+
+  function shapeFor(row,index){
+    return (row*3+index*5)%6;
+  }
+
+  function buildField(){
+    for(let r=0;r<ROWS;r++){
+      const row=document.createElement('div');
+      row.className='row';
+      row.style.top=`${r*ROW_H}px`;
+      const tiles=[];
+      for(let i=0;i<MODULES;i++){
+        const tile=document.createElement('div');
+        tile.className=`tile tone${toneFor(r,i)} shape${shapeFor(r,i)}`;
+        row.appendChild(tile);
+        tiles.push(tile);
+      }
+      stage.appendChild(row);
+      rowObjects.push({row,tiles});
+    }
+  }
+
+  function timeString(){
+    if(forced && /^\d\d:\d\d:\d\d$/.test(forced)) return forced;
+    let h='00',m='00',s='00';
+    for(const part of fmt.formatToParts(new Date())){
+      if(part.type==='hour') h=part.value;
+      else if(part.type==='minute') m=part.value;
+      else if(part.type==='second') s=part.value;
+    }
+    return `${h}:${m}:${s}`;
+  }
+
+  function buildMask(value){
+    const mask=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+    const chars=value.split('');
+    let x=OUTER_COLS;
+
+    chars.forEach((ch,slotIndex)=>{
+      const pattern=ch===':' ? COLON : DIGITS[ch];
+      const width=SLOT_WIDTHS[slotIndex];
+      for(let pr=0;pr<12;pr++){
+        const targetRow=pr+2;
+        const line=pattern[pr];
+        for(let pc=0;pc<width;pc++){
+          if(line[pc]==='1') mask[targetRow][x+pc]=1;
+        }
+      }
+      x+=width;
+      if(slotIndex<chars.length-1) x+=GAP_COLS;
+    });
+    return mask;
+  }
+
+  function filledSpans(rowMask){
+    const spans=[];
+    let start=-1;
+    for(let c=0;c<COLS;c++){
+      const filled=rowMask[c]===0;
+      if(filled && start<0) start=c;
+      if((!filled || c===COLS-1) && start>=0){
+        spans.push([start, filled && c===COLS-1 ? c+1 : c]);
+        start=-1;
+      }
+    }
+    return spans;
+  }
+
+  function allocateCounts(spans){
+    const lengths=spans.map(([a,b])=>b-a);
+    const total=lengths.reduce((a,b)=>a+b,0);
+    const counts=lengths.map(()=>1);
+    let remaining=MODULES-spans.length;
+    const ideals=lengths.map(len=>remaining*(len/total));
+    const floors=ideals.map(Math.floor);
+    floors.forEach((n,i)=>{counts[i]+=n;remaining-=n});
+    const order=ideals.map((v,i)=>({i,frac:v-Math.floor(v)})).sort((a,b)=>b.frac-a.frac);
+    for(let k=0;k<remaining;k++) counts[order[k%order.length].i]++;
+    return counts;
+  }
+
+  function weightsFor(rowIndex,count,seedOffset){
+    const weights=[];
+    for(let i=0;i<count;i++){
+      const n=(rowIndex*17+(seedOffset+i)*11)%7;
+      weights.push([1.0,1.35,.8,1.65,1.1,.95,1.45][n]);
+    }
+    return weights;
+  }
+
+  function solveRow(spans,rowIndex){
+    const targets=[];
+    const counts=allocateCounts(spans);
+    let moduleIndex=0;
+
+    spans.forEach(([a,b],spanIndex)=>{
+      const x0=a*CELL_W;
+      const x1=b*CELL_W;
+      const spanW=x1-x0;
+      const count=counts[spanIndex];
+      const innerGaps=(count-1)*TILE_GAP;
+      const usable=Math.max(26,spanW-innerGaps);
+      const weights=weightsFor(rowIndex,count,moduleIndex);
+      const sum=weights.reduce((p,c)=>p+c,0);
+      let cursor=x0;
+
+      weights.forEach((weight,localIndex)=>{
+        let width=usable*(weight/sum);
+        if(localIndex===count-1) width=x1-cursor;
+        targets.push({x:cursor,w:Math.max(26,width)});
+        cursor+=width+TILE_GAP;
+        moduleIndex++;
+      });
+    });
+
+    while(targets.length<MODULES){
+      const last=targets[targets.length-1];
+      const steal=Math.max(26,last.w*0.45);
+      last.w-=steal+TILE_GAP;
+      targets.push({x:last.x+last.w+TILE_GAP,w:steal});
+    }
+    return targets.slice(0,MODULES);
+  }
+
+  function render(value){
+    if(value===lastValue) return;
+    const mask=buildMask(value);
+    for(let r=0;r<ROWS;r++){
+      const spans=filledSpans(mask[r]);
+      const targets=solveRow(spans,r);
+      rowObjects[r].tiles.forEach((tile,i)=>{
+        tile.style.transform=`translate3d(${targets[i].x}px,0,0)`;
+        tile.style.width=`${targets[i].w}px`;
+      });
+    }
+    lastValue=value;
+  }
+
+  function tick(){
+    if(demo){
+      const raw=demoValue.replace(/:/g,'');
+      const next=String((Number(raw)+1)%1000000).padStart(6,'0');
+      demoValue=`${next.slice(0,2)}:${next.slice(2,4)}:${next.slice(4,6)}`;
+      render(demoValue);
+      timer=setTimeout(tick,460);
+      return;
+    }
+    render(timeString());
+    timer=setTimeout(tick,Math.max(70,1000-(Date.now()%1000)+15));
+  }
+
+  function scaleStage(){
+    const vw=viewport.clientWidth||innerWidth;
+    const vh=viewport.clientHeight||innerHeight;
+    const scale=Math.min(vw/SW,vh/SH);
+    const w=SW*scale,h=SH*scale;
+    stage.style.left=`${Math.round((vw-w)/2)}px`;
+    stage.style.top=`${Math.round((vh-h)/2)}px`;
+    stage.style.transform=`scale(${scale})`;
+  }
+
+  buildField();
+  scaleStage();
+  render(demo ? demoValue : timeString());
+  tick();
+  addEventListener('resize',scaleStage,{passive:true});
+  addEventListener('orientationchange',scaleStage,{passive:true});
+})();
+</script>
+</body>
+</html>
