@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
+<title>Angular Mosaic Static Prototype</title>
+<style>
+:root{--bg:#373a36;--void:#1c1b1c;--green:#89c925;--light:#f2f4f3;--g1:#d7dcda;--g2:#b9c0bc;--g3:#8f9793;--g4:#5b625e;--sw:3840px;--sh:804px}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
+#viewport{position:fixed;inset:0;background:#000}
+#stage{position:absolute;left:0;top:0;width:var(--sw);height:var(--sh);transform-origin:0 0;background:var(--void);overflow:hidden}
+#field{position:absolute;inset:0;background:var(--void);overflow:hidden}
+.piece{position:absolute;overflow:visible}
+.skin{position:absolute;inset:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.16),0 1px 2px rgba(0,0,0,.18)}
+.t0{background:var(--light)}.t1{background:var(--g1)}.t2{background:var(--g2)}.t3{background:var(--g3)}.t4{background:var(--g4)}.tg{background:var(--green)}
+.rot45 .skin{inset:12%;transform:rotate(45deg);transform-origin:center}
+.rotm45 .skin{inset:12%;transform:rotate(-45deg);transform-origin:center}
+</style>
+</head>
+<body>
+<div id="viewport"><div id="stage"><div id="field"></div></div></div>
+<script>
+(()=>{'use strict';
+const SW=3840,SH=804,COLS=96,ROWS=20,CW=SW/COLS,CH=SH/ROWS;
+const field=document.getElementById('field'),stage=document.getElementById('stage'),viewport=document.getElementById('viewport');
+const qs=new URLSearchParams(location.search);const VALUE=(qs.get('time')||'12:34:56').replace(/[^0-9:]/g,'').slice(0,8);
+const DIGSEG={0:'ABCDEF',1:'BC',2:'ABGED',3:'ABCDG',4:'FGBC',5:'AFGCD',6:'AFGECD',7:'ABC',8:'ABCDEFG',9:'ABCDFG'};
+const digitW=10,digitH=14,colonW=4,gap=2;
+const totalW=6*digitW+2*colonW+7*gap,startX=Math.floor((COLS-totalW)/2),startY=Math.floor((ROWS-digitH)/2);
+const voidMask=Array.from({length:ROWS},()=>Array(COLS).fill(false));
+function markRect(x,y,w,h){for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(yy>=0&&yy<ROWS&&xx>=0&&xx<COLS)voidMask[yy][xx]=true}
+function stampDigit(ch,x0,y0){const seg=DIGSEG[ch]||'';const has=s=>seg.includes(s);if(has('A'))markRect(x0+1,y0,8,2);if(has('G'))markRect(x0+1,y0+6,8,2);if(has('D'))markRect(x0+1,y0+12,8,2);if(has('F'))markRect(x0,y0+1,2,6);if(has('B'))markRect(x0+8,y0+1,2,6);if(has('E'))markRect(x0,y0+7,2,6);if(has('C'))markRect(x0+8,y0+7,2,6)}
+function stampColon(x0,y0){markRect(x0+1,y0+4,2,2);markRect(x0+1,y0+8,2,2)}
+let x=startX;for(const ch of VALUE){if(ch===':'){stampColon(x,startY);x+=colonW}else{stampDigit(ch,x,startY);x+=digitW}x+=gap}
+const used=Array.from({length:ROWS},()=>Array(COLS).fill(false));
+for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(voidMask[r][c])used[r][c]=true;
+function hashSeed(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+let seed=hashSeed('mosaic-'+VALUE);function rnd(){seed+=0x6D2B79F5;let t=seed;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}
+const LIB=[
+ {w:6,h:1,wt:9},{w:5,h:1,wt:11},{w:4,h:1,wt:15},{w:3,h:1,wt:16},{w:2,h:1,wt:10},{w:1,h:1,wt:4},
+ {w:1,h:2,wt:5},{w:1,h:3,wt:2},{w:2,h:2,wt:5},{w:3,h:2,wt:4},{w:4,h:2,wt:2},{w:2,h:3,wt:2}
+];
+function fits(c,r,w,h){if(c+w>COLS||r+h>ROWS)return false;for(let yy=r;yy<r+h;yy++)for(let xx=c;xx<c+w;xx++)if(used[yy][xx])return false;return true}
+function weightedCandidates(){const arr=[];for(const m of LIB){for(let i=0;i<m.wt;i++)arr.push(m)}for(let i=arr.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
+function toneClass(area){const p=rnd();if(p<.075)return'tg';if(p<.30)return't0';if(p<.52)return't1';if(p<.72)return't2';if(p<.90)return't3';return't4'}
+function nearVoid(c,r,w,h){for(let yy=Math.max(0,r-1);yy<Math.min(ROWS,r+h+1);yy++)for(let xx=Math.max(0,c-1);xx<Math.min(COLS,c+w+1);xx++)if(voidMask[yy][xx])return true;return false}
+function renderPiece(c,r,w,h){const el=document.createElement('div');el.className='piece';el.style.left=(c*CW)+'px';el.style.top=(r*CH)+'px';el.style.width=(w*CW)+'px';el.style.height=(h*CH)+'px';const skin=document.createElement('div');skin.className='skin '+toneClass(w*h);const aspect=Math.max(w/h,h/w);const nv=nearVoid(c,r,w,h);if(!nv&&w*h<=4&&aspect<=3){const p=rnd();if(p<.10)el.classList.add('rot45');else if(p<.18)el.classList.add('rotm45')}el.appendChild(skin);field.appendChild(el)}
+for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){if(used[r][c])continue;let placed=null;const candidates=weightedCandidates();for(const m of candidates){if(fits(c,r,m.w,m.h)){placed=m;break}}if(!placed)placed={w:1,h:1};for(let yy=r;yy<r+placed.h;yy++)for(let xx=c;xx<c+placed.w;xx++)used[yy][xx]=true;renderPiece(c,r,placed.w,placed.h)}
+function scale(){const vw=viewport.clientWidth||innerWidth,vh=viewport.clientHeight||innerHeight,s=Math.min(vw/SW,vh/SH),w=SW*s,h=SH*s;stage.style.left=Math.round((vw-w)/2)+'px';stage.style.top=Math.round((vh-h)/2)+'px';stage.style.transform=`scale(${s})`}
+scale();addEventListener('resize',scale,{passive:true});addEventListener('orientationchange',scale,{passive:true});
+})();
+</script>
+</body></html>
