@@ -2,13 +2,45 @@
 <html lang="en-AU">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex, nofollow, noarchive">
-  <title>Melbl8-Clock10-Seconds-Field-PT-Serif-Open-Sans</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="referrer" content="no-referrer">
+  <title>Melbourne Seconds Field Clock</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main><h1>Melbl8-Clock10-Seconds-Field-PT-Serif-Open-Sans</h1><p>Shield-optimised Seconds Field gallery clock for the Melbourne 3840 × 804 Enplug display using PT Serif and Open Sans.</p><p>Starter created. The full implementation is next.</p></main>
+  <div id="viewport" aria-label="Melbourne Seconds Field clock">
+    <main id="stage">
+      <header class="topbar">
+        <div class="location">MELBOURNE, AUSTRALIA</div>
+        <div class="field-title">SECONDS FIELD <span id="secondReadout">00 / 60</span></div>
+      </header>
+
+      <section class="time-panel" aria-label="Melbourne time">
+        <div id="time" class="time">00:00</div>
+        <div id="date" class="date">SATURDAY 15 AUGUST 2026</div>
+        <div class="time-rule"></div>
+        <div class="time-note">LOCAL TIME · 24 HOUR</div>
+      </section>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <section class="seconds-panel" aria-label="Sixty second field">
+        <div id="secondsField" class="seconds-field"></div>
+        <div class="field-footer">
+          <span>00</span>
+          <span>10</span>
+          <span>20</span>
+          <span>30</span>
+          <span>40</span>
+          <span>50</span>
+          <span>60</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
