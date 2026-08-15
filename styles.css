@@ -83,6 +83,8 @@ body {
   color: rgba(187,198,195,.72);
 }
 
+#variantName { color: rgba(187,198,195,.72); }
+
 #secondReadout {
   min-width: 118px;
   text-align: right;
@@ -94,17 +96,17 @@ body {
   position: absolute;
   left: 112px;
   top: 126px;
-  width: 1325px;
+  width: 1440px;
   height: 562px;
 }
 
 .time {
   position: absolute;
-  left: -10px;
-  top: 46px;
+  left: -8px;
+  top: 76px;
   white-space: nowrap;
   font-family: "PT Serif Local", Georgia, serif;
-  font-size: 372px;
+  font-size: 252px;
   line-height: .92;
   font-weight: 700;
   letter-spacing: -.055em;
@@ -125,7 +127,7 @@ body {
 .time-rule {
   position: absolute;
   left: 0;
-  right: 76px;
+  right: 44px;
   bottom: 50px;
   height: 1px;
   background: rgba(187,198,195,.32);
@@ -143,7 +145,7 @@ body {
 
 .divider {
   position: absolute;
-  left: 1518px;
+  left: 1588px;
   top: 126px;
   width: 1px;
   height: 562px;
@@ -152,7 +154,7 @@ body {
 
 .seconds-panel {
   position: absolute;
-  left: 1628px;
+  left: 1688px;
   right: 112px;
   top: 126px;
   height: 562px;
@@ -183,13 +185,13 @@ body {
   position: relative;
   width: 100%;
   height: calc(152px + (var(--level) * 34px));
-  min-height: 152px;
+  min-height: 120px;
   max-height: 458px;
   background: rgba(28,27,28,.48);
   border-top: 2px solid rgba(187,198,195,.18);
   transform: translate3d(0,0,0) scaleY(1) scaleX(1);
   transform-origin: 50% 100%;
-  transition: background-color 220ms linear, opacity 220ms linear, transform 260ms cubic-bezier(.2,.75,.2,1);
+  transition: background-color 220ms linear, opacity 220ms linear, transform 260ms cubic-bezier(.2,.75,.2,1), height 260ms cubic-bezier(.2,.75,.2,1);
   opacity: .72;
   contain: layout paint style;
 }
@@ -218,6 +220,37 @@ body {
   margin-left: -5px;
   border-radius: 50%;
   background: var(--white);
+}
+
+/* B: equal stems */
+#stage[data-variant="b"] .tick {
+  height: 310px;
+}
+
+#stage[data-variant="b"] .tick.current {
+  transform: translate3d(0,0,0) scaleY(1.04) scaleX(1.18);
+}
+
+/* C: equal stems with a stronger travelling pulse */
+#stage[data-variant="c"] .tick {
+  height: 286px;
+}
+
+#stage[data-variant="c"] .tick.current {
+  transform: translate3d(0,0,0) scaleY(1.05) scaleX(1.16);
+}
+
+#stage[data-variant="c"] .tick.current.pulse {
+  transform: translate3d(0,-22px,0) scaleY(1.22) scaleX(1.42);
+}
+
+/* D: static wave geometry, colour carries the elapsed time */
+#stage[data-variant="d"] .tick {
+  height: var(--wave-h, 260px);
+}
+
+#stage[data-variant="d"] .tick.current {
+  transform: translate3d(0,0,0) scaleY(1.04) scaleX(1.22);
 }
 
 .field-footer {
