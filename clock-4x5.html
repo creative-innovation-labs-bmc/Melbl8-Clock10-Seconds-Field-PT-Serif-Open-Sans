@@ -19,351 +19,47 @@ canvas{display:block;width:3840px;height:804px}
 <script>
 (() => {
 'use strict';
-
 const W=3840,H=804,COLS=43,ROWS=9;
 const CELL_W=W/COLS,CELL_H=H/ROWS,GAP=7;
 const TZ='Australia/Melbourne';
 const BG='#1c1b1c',BOARD='#373a36';
 const COLORS=['#f3f4f2','#daddda','#c2c7c3','#919894','#89c925'];
-const FONT={
- '0':['1111','1001','1001','1001','1111'],
- '1':['0110','0010','0010','0010','0111'],
- '2':['1111','0001','1111','1000','1111'],
- '3':['1111','0001','1111','0001','1111'],
- '4':['1001','1001','1111','0001','0001'],
- '5':['1111','1000','1111','0001','1111'],
- '6':['1111','1000','1111','1001','1111'],
- '7':['1111','0001','0001','0001','0001'],
- '8':['1111','1001','1111','1001','1111'],
- '9':['1111','1001','1111','0001','1111'],
- ':':['0000','0110','0000','0110','0000']
-};
+const FONT={'0':['1111','1001','1001','1001','1111'],'1':['0110','0010','0010','0010','0111'],'2':['1111','0001','1111','1000','1111'],'3':['1111','0001','1111','0001','1111'],'4':['1001','1001','1111','0001','0001'],'5':['1111','1000','1111','0001','1111'],'6':['1111','1000','1111','1001','1111'],'7':['1111','0001','0001','0001','0001'],'8':['1111','1001','1111','1001','1111'],'9':['1111','1001','1111','0001','1111'],':':['0000','0110','0000','0110','0000']};
 const PIECE_COUNTS=[7,8,7,8,7,8,7,8,7];
-const viewport=document.getElementById('viewport');
-const stage=document.getElementById('stage');
-const canvas=document.getElementById('clock');
-const ctx=canvas.getContext('2d',{alpha:false});
-ctx.imageSmoothingEnabled=false;
-
-const params=new URLSearchParams(location.search);
-const DEMO=params.get('demo')==='1';
-const FIXED_TIME=/^\d{2}:\d{2}:\d{2}$/.test(params.get('time')||'')?params.get('time'):null;
-const FIXED_SEED=Number.isFinite(Number(params.get('seed')))?Number(params.get('seed')):null;
-const PREVIEW_FROM=/^\d{2}:\d{2}:\d{2}$/.test(params.get('from')||'')?params.get('from'):null;
-const PREVIEW_TO=/^\d{2}:\d{2}:\d{2}$/.test(params.get('to')||'')?params.get('to'):null;
-const PREVIEW_T=Math.max(0,Math.min(1,Number(params.get('t'))||0));
-
-let currentTime='00:00:00';
-let currentMask=buildMask(currentTime);
-let currentSeed=0;
-let currentConfig=buildConfig(currentSeed);
-let maskTransition=null;
-let configTransition=null;
-let frameHandle=0;
-let tickTimer=0;
-let demoSeconds=22*3600+22*60+20;
-let demoTickCount=0;
-
-function scaleStage(){
- const vw=viewport.clientWidth||window.innerWidth;
- const vh=viewport.clientHeight||window.innerHeight;
- const s=Math.min(vw/W,vh/H);
- stage.style.left=Math.round((vw-W*s)/2)+'px';
- stage.style.top=Math.round((vh-H*s)/2)+'px';
- stage.style.transform=`scale(${s})`;
-}
-
-function xorshift(seed){
- let x=(seed|0)||123456789;
- return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return((x>>>0)%1000000)/1000000};
-}
-
-function pieceColor(row,index){
- const n=(row*19+index*13)%25;
- if(n===0||n===11)return COLORS[4];
- if(n<10)return COLORS[0];
- if(n<16)return COLORS[1];
- if(n<21)return COLORS[2];
- return COLORS[3];
-}
-
-function buildRowWidths(row,seed){
- const count=PIECE_COUNTS[row],min=2,remaining=COLS-count*min;
- const rnd=xorshift((seed+1)*7919+row*104729);
- const weights=[];let weightSum=0;
- for(let i=0;i<count;i++){
-  let w=0.3+Math.pow(rnd(),1.35)*1.6;
-  if(i===((seed+row*2)%count))w+=1.5;
-  weights.push(w);weightSum+=w;
- }
- const widths=weights.map(w=>min+Math.floor((w/weightSum)*remaining));
- let used=widths.reduce((a,b)=>a+b,0),cursor=(seed+row*3)%count;
- while(used<COLS){widths[cursor]+=1;used+=1;cursor=(cursor+3)%count}
- while(used>COLS){if(widths[cursor]>min){widths[cursor]-=1;used-=1}cursor=(cursor+2)%count}
- return widths;
-}
-
-function buildConfig(seed){
- const config=[];
- for(let row=0;row<ROWS;row++){
-  const widths=buildRowWidths(row,seed);let x=0;
-  config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index)};x+=width;return p}));
- }
- return config;
-}
-
-function buildMask(timeStr){
- const mask=Array.from({length:ROWS},()=>Array(COLS).fill(0));
- let x=2;
- for(const ch of timeStr){
-  const glyph=FONT[ch];
-  for(let r=0;r<5;r++)for(let c=0;c<4;c++)if(glyph[r][c]==='1')mask[r+2][x+c]=1;
-  x+=5;
- }
- return mask;
-}
-
-function buildDiffRuns(oldMask,newMask){
- const runs=[];
- for(let row=0;row<ROWS;row++){
-  let col=0;
-  while(col<COLS){
-   if(oldMask[row][col]===newMask[row][col]){col++;continue}
-   const type=newMask[row][col]===1?'cut':'fill';
-   const start=col;
-   while(col+1<COLS&&oldMask[row][col+1]!==newMask[row][col+1]&&(newMask[row][col+1]===1?'cut':'fill')===type)col++;
-   const end=col;
-   runs.push({row,start,end,type,center:(start+end+1)/2,width:end-start+1});
-   col++;
-  }
- }
- return runs;
-}
-
-function buildChangedZones(oldTime,newTime){
- const zones=[];
- for(let i=0;i<Math.min(oldTime.length,newTime.length);i++){
-  if(oldTime[i]===newTime[i])continue;
-  const glyphStart=2+i*5;
-  zones.push({start:Math.max(0,glyphStart-0.65),end:Math.min(COLS,glyphStart+4.65),charIndex:i});
- }
- if(!zones.length)return zones;
- zones.sort((a,b)=>a.start-b.start);
- const merged=[{...zones[0],indices:[zones[0].charIndex]}];
- for(let i=1;i<zones.length;i++){
-  const z=zones[i],m=merged[merged.length-1];
-  if(z.start<=m.end+0.35){m.end=Math.max(m.end,z.end);m.indices.push(z.charIndex)}
-  else merged.push({...z,indices:[z.charIndex]});
- }
- return merged;
-}
-
-function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
-function smoother(t){t=clamp(t,0,1);return t*t*t*(t*(t*6-15)+10)}
-function pulse(t){return Math.sin(Math.PI*clamp(t,0,1))}
-
-function activeProgress(now){
- let maskT=1,configT=1;
- if(maskTransition)maskT=clamp((now-maskTransition.start)/maskTransition.duration,0,1);
- if(configTransition)configT=clamp((now-configTransition.start)/configTransition.duration,0,1);
- return{maskT,configT};
-}
-
-function localDeform(row,xCells,wCells,t,runs){
- const baseX=xCells*CELL_W;
- const baseW=wCells*CELL_W;
- if(!runs||!runs.length)return{x:baseX,w:baseW};
- const p=pulse(t);
- if(p<0.0001)return{x:baseX,w:baseW};
- const pieceCenter=xCells+wCells/2;
- let shiftCells=0;
- let scale=1;
- for(const r of runs){
-  if(r.row!==row)continue;
-  const dist=Math.abs(pieceCenter-r.center);
-  const radius=8.0;
-  if(dist>=radius)continue;
-  const influence=(1-dist/radius)*p;
-  const dir=pieceCenter<r.center?-1:1;
-  if(r.type==='cut'){
-   shiftCells+=dir*0.48*influence;
-   scale-=0.075*influence;
-  }else{
-   shiftCells-=dir*0.40*influence;
-   scale+=0.060*influence;
-  }
- }
- const newW=Math.max(CELL_W*1.1,baseW*scale);
- const centerPx=(pieceCenter+shiftCells)*CELL_W;
- return{x:centerPx-newW/2,w:newW};
-}
-
-function drawPieces(configA,configB,configT,maskT,runs,clear=true){
- if(clear){ctx.fillStyle=BOARD;ctx.fillRect(0,0,W,H);}
- const ct=smoother(configT);
- for(let row=0;row<ROWS;row++){
-  const a=configA[row],b=configB?configB[row]:a;
-  for(let i=0;i<a.length;i++){
-   const xCells=a[i].x+(b[i].x-a[i].x)*ct;
-   const wCells=a[i].width+(b[i].width-a[i].width)*ct;
-   const d=localDeform(row,xCells,wCells,maskT,runs);
-   const x=d.x+GAP/2;
-   const y=row*CELL_H+GAP/2;
-   const w=Math.max(1,d.w-GAP);
-   const h=CELL_H-GAP;
-   ctx.fillStyle=a[i].color;
-   ctx.fillRect(x,y,w,h);
-  }
- }
-}
-
-function drawDeformedZones(configA,configB,configT,maskT,runs,zones){
- if(!zones||!zones.length)return;
- for(const zone of zones){
-  const zoneRuns=runs.filter(r=>r.center>=zone.start-1.0&&r.center<=zone.end+1.0);
-  if(!zoneRuns.length)continue;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(zone.start*CELL_W,0,(zone.end-zone.start)*CELL_W,H);
-  ctx.clip();
-  drawPieces(configA,configB,configT,maskT,zoneRuns,false);
-  ctx.restore();
- }
-}
-
-function drawStableVoid(oldMask,newMask){
- ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++){
-  if(oldMask[row][col]===1&&newMask[row][col]===1){
-   ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.5,CELL_H+0.5);
-  }
- }
-}
-
-function drawWholeVoid(mask){
- ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col]){
-  ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.5,CELL_H+0.5);
- }
-}
-
-function drawMorphVoid(runs,t){
- const et=smoother(t);
- ctx.fillStyle=BG;
- for(const r of runs){
-  const fullX=r.start*CELL_W;
-  const fullW=r.width*CELL_W;
-  const y=r.row*CELL_H;
-  let voidW;
-  if(r.type==='cut') voidW=fullW*et;
-  else voidW=fullW*(1-et);
-  if(voidW<=0.1)continue;
-  const x=fullX+(fullW-voidW)/2;
-  ctx.fillRect(x,y,voidW+0.5,CELL_H+0.5);
- }
-}
-
-function renderAt(now){
- const {maskT,configT}=activeProgress(now);
- const fromCfg=configTransition?configTransition.from:currentConfig;
- const toCfg=configTransition?configTransition.to:null;
- const runs=maskTransition?maskTransition.runs:null;
- drawPieces(fromCfg,toCfg,configT,1,null,true);
- if(maskTransition){
-  drawDeformedZones(fromCfg,toCfg,configT,maskT,maskTransition.runs,maskTransition.zones);
-  drawStableVoid(maskTransition.from,maskTransition.to);
-  drawMorphVoid(maskTransition.runs,maskT);
- }else{
-  drawWholeVoid(currentMask);
- }
- const maskDone=!maskTransition||maskT>=1;
- const configDone=!configTransition||configT>=1;
- if(maskDone&&maskTransition){currentMask=maskTransition.to;maskTransition=null}
- if(configDone&&configTransition){currentConfig=configTransition.to;configTransition=null}
- if(maskTransition||configTransition)frameHandle=requestAnimationFrame(renderAt);
- else frameHandle=0;
-}
-
-function kickRender(){if(!frameHandle)frameHandle=requestAnimationFrame(renderAt)}
-
-function melbourneParts(date){
- const parts=new Intl.DateTimeFormat('en-AU',{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
- let hh='00',mm='00',ss='00';
- for(const p of parts){if(p.type==='hour')hh=p.value;else if(p.type==='minute')mm=p.value;else if(p.type==='second')ss=p.value}
- return{hh,mm,ss};
-}
-
-function settleMaskTransition(){
- if(maskTransition){currentMask=maskTransition.to;maskTransition=null}
-}
-
-function applyTime(timeStr,seed,allowMinuteMorph=true){
- settleMaskTransition();
- const previousTime=currentTime;
- const nextMask=buildMask(timeStr);
- const runs=buildDiffRuns(currentMask,nextMask);
- const zones=buildChangedZones(previousTime,timeStr);
- if(runs.length){
-  maskTransition={from:currentMask,to:nextMask,runs,zones,start:performance.now(),duration:840};
- }else currentMask=nextMask;
- if(seed!==currentSeed){
-  if(allowMinuteMorph){
-   const from=configTransition?configTransition.to:currentConfig;
-   currentConfig=from;
-   configTransition={from,to:buildConfig(seed),start:performance.now(),duration:1700};
-  }else currentConfig=buildConfig(seed);
-  currentSeed=seed;
- }
- currentTime=timeStr;
- kickRender();
-}
-
-function liveTick(){
- const p=melbourneParts(new Date());
- const str=`${p.hh}:${p.mm}:${p.ss}`;
- const seed=Number(p.hh)*60+Number(p.mm);
- applyTime(str,seed,true);
- tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20));
-}
-
-function demoTick(){
- demoSeconds=(demoSeconds+1)%(24*3600);demoTickCount++;
- const hh=String(Math.floor(demoSeconds/3600)%24).padStart(2,'0');
- const mm=String(Math.floor(demoSeconds/60)%60).padStart(2,'0');
- const ss=String(demoSeconds%60).padStart(2,'0');
- const seed=Math.floor(demoTickCount/7);
- applyTime(`${hh}:${mm}:${ss}`,seed,true);
- tickTimer=setTimeout(demoTick,1000);
-}
-
-function initialise(){
- scaleStage();
- if(PREVIEW_FROM&&PREVIEW_TO){
-  currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed);
-  const from=buildMask(PREVIEW_FROM),to=buildMask(PREVIEW_TO),runs=buildDiffRuns(from,to),zones=buildChangedZones(PREVIEW_FROM,PREVIEW_TO);
-  drawPieces(currentConfig,null,1,1,null,true);
-  drawDeformedZones(currentConfig,null,1,PREVIEW_T,runs,zones);
-  drawStableVoid(from,to);drawMorphVoid(runs,PREVIEW_T);return;
- }
- if(FIXED_TIME){
-  currentTime=FIXED_TIME;currentMask=buildMask(FIXED_TIME);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed);
-  drawPieces(currentConfig,null,1,1,null);drawWholeVoid(currentMask);return;
- }
- const p=melbourneParts(new Date());
- currentTime=`${p.hh}:${p.mm}:${p.ss}`;currentMask=buildMask(currentTime);currentSeed=Number(p.hh)*60+Number(p.mm);currentConfig=buildConfig(currentSeed);
- drawPieces(currentConfig,null,1,1,null);drawWholeVoid(currentMask);
- if(DEMO)tickTimer=setTimeout(demoTick,700);else tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20));
-}
-
-addEventListener('resize',scaleStage,{passive:true});
-addEventListener('orientationchange',scaleStage,{passive:true});
-document.addEventListener('visibilitychange',()=>{
- if(!document.hidden&&!FIXED_TIME&&!PREVIEW_FROM){
-  clearTimeout(tickTimer);
-  if(DEMO)demoTick();else liveTick();
- }
-});
-initialise();
+const AMBIENT_SPEED={0:0.018,1:-0.011,7:0.014,8:-0.020};
+const AMBIENT_ROWS=new Set([0,1,7,8]);
+const AMBIENT_FRAME_MS=1000/30;
+const viewport=document.getElementById('viewport'),stage=document.getElementById('stage'),canvas=document.getElementById('clock'),ctx=canvas.getContext('2d',{alpha:false});ctx.imageSmoothingEnabled=false;
+const params=new URLSearchParams(location.search),DEMO=params.get('demo')==='1',FIXED_TIME=/^\d{2}:\d{2}:\d{2}$/.test(params.get('time')||'')?params.get('time'):null,FIXED_SEED=Number.isFinite(Number(params.get('seed')))?Number(params.get('seed')):null;
+let currentTime='00:00:00',currentMask=buildMask(currentTime),currentSeed=0,currentConfig=buildConfig(currentSeed),maskTransition=null,configTransition=null,tickTimer=0,demoSeconds=22*3600+22*60+20,demoTickCount=0,lastRender=0;
+function scaleStage(){const vw=viewport.clientWidth||window.innerWidth,vh=viewport.clientHeight||window.innerHeight,s=Math.min(vw/W,vh/H);stage.style.left=Math.round((vw-W*s)/2)+'px';stage.style.top=Math.round((vh-H*s)/2)+'px';stage.style.transform=`scale(${s})`}
+function xorshift(seed){let x=(seed|0)||123456789;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return((x>>>0)%1000000)/1000000}}
+function pieceColor(row,index){const n=(row*19+index*13)%25;if(n===0||n===11)return COLORS[4];if(n<10)return COLORS[0];if(n<16)return COLORS[1];if(n<21)return COLORS[2];return COLORS[3]}
+function buildRowWidths(row,seed){const count=PIECE_COUNTS[row],min=2,remaining=COLS-count*min,rnd=xorshift((seed+1)*7919+row*104729),weights=[];let weightSum=0;for(let i=0;i<count;i++){let w=0.3+Math.pow(rnd(),1.35)*1.6;if(i===((seed+row*2)%count))w+=1.5;weights.push(w);weightSum+=w}const widths=weights.map(w=>min+Math.floor((w/weightSum)*remaining));let used=widths.reduce((a,b)=>a+b,0),cursor=(seed+row*3)%count;while(used<COLS){widths[cursor]+=1;used+=1;cursor=(cursor+3)%count}while(used>COLS){if(widths[cursor]>min){widths[cursor]-=1;used-=1}cursor=(cursor+2)%count}return widths}
+function buildConfig(seed){const config=[];for(let row=0;row<ROWS;row++){const widths=buildRowWidths(row,seed);let x=0;config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index)};x+=width;return p}))}return config}
+function buildMask(timeStr){const mask=Array.from({length:ROWS},()=>Array(COLS).fill(0));let x=2;for(const ch of timeStr){const glyph=FONT[ch];for(let r=0;r<5;r++)for(let c=0;c<4;c++)if(glyph[r][c]==='1')mask[r+2][x+c]=1;x+=5}return mask}
+function changedSlots(fromTime,toTime){const slots=[];for(let i=0;i<Math.min(fromTime.length,toTime.length);i++){if(fromTime[i]===toTime[i])continue;const start=2+i*5;slots.push({index:i,start,end:start+3})}return slots}
+function slotForCol(slots,col){for(const s of slots)if(col>=s.start&&col<=s.end)return s;return null}
+function buildDiffRuns(oldMask,newMask,slots){const runs=[];for(let row=2;row<=6;row++){let col=0;while(col<COLS){const slot=slotForCol(slots,col);if(!slot||oldMask[row][col]===newMask[row][col]){col++;continue}const type=newMask[row][col]===1?'cut':'fill',start=col;while(col+1<=slot.end&&oldMask[row][col+1]!==newMask[row][col+1]&&(newMask[row][col+1]===1?'cut':'fill')===type)col++;const end=col;runs.push({row,start,end,type,center:(start+end+1)/2,slot});col++}}return runs}
+function ease(t){return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2}function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function ambientOffsetPx(row,now){if(!AMBIENT_ROWS.has(row))return 0;const px=(now/1000)*(AMBIENT_SPEED[row]||0)*CELL_W;return((px%W)+W)%W}
+function rowY(row){const top=row*CELL_H+(row===0?0:GAP/2),bottom=(row+1)*CELL_H-(row===ROWS-1?0:GAP/2);return{y:top,h:bottom-top}}
+function drawWrappedRect(x,y,w,h,color){ctx.fillStyle=color;for(const shift of[-W,0,W]){const xx=x+shift;if(xx+w<0||xx>W)continue;ctx.fillRect(xx,y,w,h)}}
+function interpPiece(a,b,t){return{x:a.x+(b.x-a.x)*t,width:a.width+(b.width-a.width)*t,color:a.color}}
+function configState(now){if(!configTransition)return{from:currentConfig,to:null,t:1};const raw=clamp((now-configTransition.start)/configTransition.duration,0,1);return{from:configTransition.from,to:configTransition.to,t:ease(raw),raw}}
+function drawFieldBase(now){ctx.fillStyle=BOARD;ctx.fillRect(0,0,W,H);const cs=configState(now);for(let row=0;row<ROWS;row++){const a=cs.from[row],b=cs.to?cs.to[row]:a,offset=ambientOffsetPx(row,now),{y,h}=rowY(row);for(let i=0;i<a.length;i++){const p=interpPiece(a[i],b[i],cs.t),x=p.x*CELL_W+offset+GAP/2,w=Math.max(1,p.width*CELL_W-GAP);drawWrappedRect(x,y,w,h,p.color)}}if(configTransition&&cs.raw>=1){currentConfig=configTransition.to;configTransition=null}}
+function localDeform(piece,row,slot,t,diffs){const pulse=Math.sin(Math.PI*t);if(pulse<=0.0001)return{x:piece.x*CELL_W,w:piece.width*CELL_W};const center=piece.x+piece.width/2;let shift=0,scale=1;for(const d of diffs){if(d.row!==row||d.slot.index!==slot.index)continue;const dist=Math.abs(center-d.center),radius=4.2;if(dist>=radius)continue;const influence=(1-dist/radius)*pulse,direction=center<d.center?-1:1;if(d.type==='cut'){shift+=direction*CELL_W*0.32*influence;scale-=0.075*influence}else{shift-=direction*CELL_W*0.26*influence;scale+=0.060*influence}}const baseW=piece.width*CELL_W,newW=Math.max(CELL_W*1.15,baseW*scale),baseCenter=center*CELL_W;return{x:baseCenter+shift-newW/2,w:newW}}
+function drawChangedSlotsOverlay(now,transition,t){if(!transition||!transition.slots.length)return;const cs=configState(now),mt=ease(t);for(const slot of transition.slots){ctx.save();const clipX=(slot.start-0.35)*CELL_W,clipW=(slot.end-slot.start+1+0.70)*CELL_W;ctx.beginPath();ctx.rect(clipX,2*CELL_H,clipW,5*CELL_H);ctx.clip();for(let row=2;row<=6;row++){const a=cs.from[row],b=cs.to?cs.to[row]:a,{y,h}=rowY(row);for(let i=0;i<a.length;i++){const p=interpPiece(a[i],b[i],cs.t),d=localDeform(p,row,slot,mt,transition.runs),x=d.x+GAP/2,w=Math.max(1,d.w-GAP);ctx.fillStyle=p.color;ctx.fillRect(x,y,w,h)}}ctx.restore()}}
+function cutWholeMask(mask){ctx.fillStyle=BG;for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6)}
+function cutStableMask(oldMask,newMask){ctx.fillStyle=BG;for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(oldMask[row][col]&&newMask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6)}
+function drawDiffRuns(runs,t){const et=ease(t);ctx.fillStyle=BG;for(const r of runs){const x=r.start*CELL_W,y=r.row*CELL_H,width=(r.end-r.start+1)*CELL_W;if(r.type==='cut'){const w=width*et;ctx.fillRect(x+(width-w)/2,y,w+0.6,CELL_H+0.6)}else{const w=width*(1-et);if(w>0.2)ctx.fillRect(x+(width-w)/2,y,w+0.6,CELL_H+0.6)}}}
+function render(now){if(now-lastRender<AMBIENT_FRAME_MS){requestAnimationFrame(render);return}lastRender=now;drawFieldBase(now);if(maskTransition){const raw=clamp((now-maskTransition.start)/maskTransition.duration,0,1);drawChangedSlotsOverlay(now,maskTransition,raw);cutStableMask(maskTransition.from,maskTransition.to);drawDiffRuns(maskTransition.runs,raw);if(raw>=1){currentMask=maskTransition.to;maskTransition=null}}else cutWholeMask(currentMask);requestAnimationFrame(render)}
+function melbourneParts(date){const parts=new Intl.DateTimeFormat('en-AU',{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);let hh='00',mm='00',ss='00';for(const p of parts){if(p.type==='hour')hh=p.value;else if(p.type==='minute')mm=p.value;else if(p.type==='second')ss=p.value}return{hh,mm,ss}}
+function applyTime(timeStr,seed,allowMinuteMorph=true){const nextMask=buildMask(timeStr),slots=changedSlots(currentTime,timeStr),runs=buildDiffRuns(currentMask,nextMask,slots);if(runs.length)maskTransition={from:currentMask,to:nextMask,runs,slots,start:performance.now(),duration:820};else currentMask=nextMask;if(seed!==currentSeed){if(allowMinuteMorph)configTransition={from:currentConfig,to:buildConfig(seed),start:performance.now(),duration:1700};else currentConfig=buildConfig(seed);currentSeed=seed}currentTime=timeStr}
+function liveTick(){const p=melbourneParts(new Date()),str=`${p.hh}:${p.mm}:${p.ss}`,seed=Number(p.hh)*60+Number(p.mm);applyTime(str,seed,true);tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20))}
+function demoTick(){demoSeconds=(demoSeconds+1)%(24*3600);demoTickCount++;const hh=String(Math.floor(demoSeconds/3600)%24).padStart(2,'0'),mm=String(Math.floor(demoSeconds/60)%60).padStart(2,'0'),ss=String(demoSeconds%60).padStart(2,'0'),seed=Math.floor(demoTickCount/6);applyTime(`${hh}:${mm}:${ss}`,seed,true);tickTimer=setTimeout(demoTick,1000)}
+function initialise(){scaleStage();if(FIXED_TIME){currentTime=FIXED_TIME;currentMask=buildMask(FIXED_TIME);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed)}else{const p=melbourneParts(new Date());currentTime=`${p.hh}:${p.mm}:${p.ss}`;currentMask=buildMask(currentTime);currentSeed=Number(p.hh)*60+Number(p.mm);currentConfig=buildConfig(currentSeed);if(DEMO)tickTimer=setTimeout(demoTick,700);else tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20))}requestAnimationFrame(render)}
+addEventListener('resize',scaleStage,{passive:true});addEventListener('orientationchange',scaleStage,{passive:true});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!FIXED_TIME&&!DEMO){clearTimeout(tickTimer);liveTick()}});initialise();
 })();
 </script>
 </body>
