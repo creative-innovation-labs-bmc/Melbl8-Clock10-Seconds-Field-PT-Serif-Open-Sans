@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="referrer" content="no-referrer">
+  <title>Clock 10 · 4x5 Negative Space</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    #viewport {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    #stage {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 3840px;
+      height: 804px;
+      transform-origin: 0 0;
+      overflow: hidden;
+      background: #373a36;
+    }
+    canvas {
+      display: block;
+      width: 3840px;
+      height: 804px;
+    }
+  </style>
+</head>
+<body>
+<div id="viewport">
+  <div id="stage">
+    <canvas id="clock" width="3840" height="804" aria-label="Melbourne 24 hour clock"></canvas>
+  </div>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  const W = 3840;
+  const H = 804;
+  const COLS = 43;
+  const ROWS = 9;
+  const CELL_W = W / COLS;
+  const CELL_H = H / ROWS;
+  const GAP = 7;
+  const TZ = 'Australia/Melbourne';
+
+  const BG = '#1c1b1c';
+  const BOARD = '#373a36';
+  const COLORS = ['#f3f4f2', '#daddda', '#c2c7c3', '#919894', '#89c925'];
+
+  const FONT = {
+    '0': ['1111','1001','1001','1001','1111'],
+    '1': ['0110','0010','0010','0010','0111'],
+    '2': ['1111','0001','1111','1000','1111'],
+    '3': ['1111','0001','1111','0001','1111'],
+    '4': ['1001','1001','1111','0001','0001'],
+    '5': ['1111','1000','1111','0001','1111'],
+    '6': ['1111','1000','1111','1001','1111'],
+    '7': ['1111','0001','0001','0001','0001'],
+    '8': ['1111','1001','1111','1001','1111'],
+    '9': ['1111','1001','1111','0001','1111'],
+    ':': ['0000','0110','0000','0110','0000']
+  };
+
+  const PIECE_COUNTS = [7, 8, 7, 8, 7, 8, 7, 8, 7];
+
+  const viewport = document.getElementById('viewport');
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('clock');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingEnabled = false;
+
+  const params = new URLSearchParams(location.search);
+  const DEMO = params.get('demo') === '1';
+  const FIXED_TIME = /^\d{2}:\d{2}:\d{2}$/.test(params.get('time') || '') ? params.get('time') : null;
+  const FIXED_SEED = Number.isFinite(Number(params.get('seed'))) ? Number(params.get('seed')) : null;
+
+  let currentTime = FIXED_TIME || '00:00:00';
+  let currentMask = buildMask(currentTime);
+  let currentSeed = FIXED_SEED ?? 0;
+  let currentConfig = buildConfig(currentSeed);
+  let fromConfig = null;
+  let toConfig = null;
+  let transitionStart = 0;
+  let animationFrame = 0;
+  let tickTimer = 0;
+  let demoTicks = 0;
+
+  function scaleStage() {
+    const vw = viewport.clientWidth || window.innerWidth;
+    const vh = viewport.clientHeight || window.innerHeight;
+    const s = Math.min(vw / W, vh / H);
+    stage.style.left = Math.round((vw - W * s) / 2) + 'px';
+    stage.style.top = Math.round((vh - H * s) / 2) + 'px';
+    stage.style.transform = `scale(${s})`;
+  }
+
+  function xorshift(seed) {
+    let x = (seed | 0) || 123456789;
+    return () => {
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      return ((x >>> 0) % 1000000) / 1000000;
+    };
+  }
+
+  function pieceColor(row, index) {
+    const n = (row * 19 + index * 13) % 25;
+    if (n === 0 || n === 11) return COLORS[4];
+    if (n < 10) return COLORS[0];
+    if (n < 16) return COLORS[1];
+    if (n < 21) return COLORS[2];
+    return COLORS[3];
+  }
+
+  function buildRowWidths(row, seed) {
+    const count = PIECE_COUNTS[row];
+    const min = 2;
+    const remaining = COLS - count * min;
+    const rnd = xorshift((seed + 1) * 7919 + row * 104729);
+    const weights = [];
+    let weightSum = 0;
+
+    for (let i = 0; i < count; i++) {
+      let w = 0.3 + Math.pow(rnd(), 1.35) * 1.6;
+      if (i === ((seed + row * 2) % count)) w += 1.5;
+      weights.push(w);
+      weightSum += w;
+    }
+
+    const widths = weights.map(w => min + Math.floor((w / weightSum) * remaining));
+    let used = widths.reduce((a, b) => a + b, 0);
+    let cursor = (seed + row * 3) % count;
+    while (used < COLS) {
+      widths[cursor] += 1;
+      used += 1;
+      cursor = (cursor + 3) % count;
+    }
+    while (used > COLS) {
+      if (widths[cursor] > min) {
+        widths[cursor] -= 1;
+        used -= 1;
+      }
+      cursor = (cursor + 2) % count;
+    }
+    return widths;
+  }
+
+  function buildConfig(seed) {
+    const config = [];
+    for (let row = 0; row < ROWS; row++) {
+      const widths = buildRowWidths(row, seed);
+      let x = 0;
+      const rowPieces = widths.map((width, index) => {
+        const piece = {
+          x,
+          width,
+          color: pieceColor(row, index)
+        };
+        x += width;
+        return piece;
+      });
+      config.push(rowPieces);
+    }
+    return config;
+  }
+
+  function buildMask(timeStr) {
+    const mask = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    let x = 2;
+    for (const ch of timeStr) {
+      const glyph = FONT[ch];
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 4; c++) {
+          if (glyph[r][c] === '1') mask[r + 2][x + c] = 1;
+        }
+      }
+      x += 5;
+    }
+    return mask;
+  }
+
+  function drawConfig(configA, configB, t) {
+    ctx.fillStyle = BOARD;
+    ctx.fillRect(0, 0, W, H);
+
+    for (let row = 0; row < ROWS; row++) {
+      const a = configA[row];
+      const b = configB ? configB[row] : a;
+      for (let i = 0; i < a.length; i++) {
+        const xCells = a[i].x + (b[i].x - a[i].x) * t;
+        const wCells = a[i].width + (b[i].width - a[i].width) * t;
+        const x = xCells * CELL_W + GAP / 2;
+        const y = row * CELL_H + GAP / 2;
+        const w = wCells * CELL_W - GAP;
+        const h = CELL_H - GAP;
+        ctx.fillStyle = a[i].color;
+        ctx.fillRect(x, y, Math.max(1, w), h);
+      }
+    }
+  }
+
+  function cutTime(mask) {
+    ctx.fillStyle = BG;
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        if (mask[row][col]) {
+          ctx.fillRect(col * CELL_W, row * CELL_H, CELL_W + 0.5, CELL_H + 0.5);
+        }
+      }
+    }
+  }
+
+  function drawStatic() {
+    drawConfig(currentConfig, null, 0);
+    cutTime(currentMask);
+  }
+
+  function animateMinute(now) {
+    const duration = 900;
+    const raw = Math.min(1, (now - transitionStart) / duration);
+    const t = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+    drawConfig(fromConfig, toConfig, t);
+    cutTime(currentMask);
+
+    if (raw < 1) {
+      animationFrame = requestAnimationFrame(animateMinute);
+    } else {
+      currentConfig = toConfig;
+      fromConfig = null;
+      toConfig = null;
+      animationFrame = 0;
+      drawStatic();
+    }
+  }
+
+  function beginMinuteTransition(nextSeed) {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    fromConfig = currentConfig;
+    toConfig = buildConfig(nextSeed);
+    transitionStart = performance.now();
+    currentSeed = nextSeed;
+    animationFrame = requestAnimationFrame(animateMinute);
+  }
+
+  function melbourneParts(date) {
+    const parts = new Intl.DateTimeFormat('en-AU', {
+      timeZone: TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(date);
+    let hh = '00', mm = '00', ss = '00';
+    for (const p of parts) {
+      if (p.type === 'hour') hh = p.value;
+      else if (p.type === 'minute') mm = p.value;
+      else if (p.type === 'second') ss = p.value;
+    }
+    return { hh, mm, ss };
+  }
+
+  function applyTime(timeStr, minuteSeed, allowTransition) {
+    const nextMask = buildMask(timeStr);
+    const minuteChanged = minuteSeed !== currentSeed;
+    currentTime = timeStr;
+    currentMask = nextMask;
+
+    if (minuteChanged && allowTransition) {
+      beginMinuteTransition(minuteSeed);
+    } else {
+      currentSeed = minuteSeed;
+      if (!fromConfig) drawStatic();
+    }
+  }
+
+  function liveTick() {
+    const now = new Date();
+    const p = melbourneParts(now);
+    const timeStr = `${p.hh}:${p.mm}:${p.ss}`;
+    const seed = Number(p.hh) * 60 + Number(p.mm);
+    applyTime(timeStr, seed, true);
+    tickTimer = window.setTimeout(liveTick, Math.max(50, 1000 - (Date.now() % 1000) + 20));
+  }
+
+  function demoTick() {
+    demoTicks += 1;
+    const base = 22 * 3600 + 22 * 60 + 20 + demoTicks;
+    const hh = String(Math.floor(base / 3600) % 24).padStart(2, '0');
+    const mm = String(Math.floor(base / 60) % 60).padStart(2, '0');
+    const ss = String(base % 60).padStart(2, '0');
+    const seed = Math.floor(demoTicks / 8);
+    applyTime(`${hh}:${mm}:${ss}`, seed, true);
+    tickTimer = window.setTimeout(demoTick, 450);
+  }
+
+  function initialise() {
+    scaleStage();
+
+    if (FIXED_TIME) {
+      currentTime = FIXED_TIME;
+      currentMask = buildMask(FIXED_TIME);
+      currentSeed = FIXED_SEED ?? 0;
+      currentConfig = buildConfig(currentSeed);
+      drawStatic();
+      return;
+    }
+
+    const p = melbourneParts(new Date());
+    currentTime = `${p.hh}:${p.mm}:${p.ss}`;
+    currentMask = buildMask(currentTime);
+    currentSeed = Number(p.hh) * 60 + Number(p.mm);
+    currentConfig = buildConfig(currentSeed);
+    drawStatic();
+
+    if (DEMO) demoTick();
+    else liveTick();
+  }
+
+  window.addEventListener('resize', scaleStage, { passive: true });
+  window.addEventListener('orientationchange', scaleStage, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !FIXED_TIME && !DEMO) {
+      clearTimeout(tickTimer);
+      liveTick();
+    }
+  });
+
+  initialise();
+})();
+</script>
+</body>
+</html>
