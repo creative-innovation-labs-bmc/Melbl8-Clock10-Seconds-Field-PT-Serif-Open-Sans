@@ -43,7 +43,7 @@ const ALL_KINETIC_ROWS=[0,1,2,3,4,5,6,7,8];
 const OUTER_KINETIC_ROWS=[0,1,8,7];
 const FRAME_MS=1000/30;
 const DIGIT_TRANSITION_MS=900;
-const ROW_TRANSITION_MS=920;
+const ROW_TRANSITION_MS=820;
 const MINUTE_TRANSITION_MS=1450;
 
 const viewport=document.getElementById('viewport');
@@ -62,7 +62,7 @@ const PREVIEW_T=Math.max(0,Math.min(1,Number(params.get('t'))||0));
 const PREVIEW_ROW=Number.isFinite(Number(params.get('row')))?Math.max(0,Math.min(8,Number(params.get('row')))):0;
 const ROW_MODE=(params.get('rows')||'all').toLowerCase();
 const KINETIC_ROWS=ROW_MODE==='outer'?OUTER_KINETIC_ROWS:(ROW_MODE==='none'?[]:ALL_KINETIC_ROWS);
-const GREEN_MAX=Math.max(1,Math.min(4,parseInt(params.get('green')||'3',10)||3));
+const GREEN_MAX=Math.max(1,Math.min(4,parseInt(params.get('green')||'2',10)||2));
 
 let currentTime='00:00:00';
 let currentMask=buildMask(currentTime);
@@ -73,7 +73,6 @@ let configTransition=null;
 let rowTransition=null;
 let tickTimer=0;
 let demoSeconds=22*3600+22*60+20;
-let demoTickCount=0;
 let lastRender=0;
 
 function scaleStage(){
@@ -84,417 +83,66 @@ function scaleStage(){
  stage.style.top=Math.round((vh-H*s)/2)+'px';
  stage.style.transform=`scale(${s})`;
 }
-
-function xorshift(seed){
- let x=(seed|0)||123456789;
- return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return((x>>>0)%1000000)/1000000};
-}
-
-function neutralColor(row,index){
- const n=(row*19+index*13)%21;
- if(n<8)return COLORS[0];
- if(n<13)return COLORS[1];
- if(n<18)return COLORS[2];
- return COLORS[3];
-}
-
+function xorshift(seed){let x=(seed|0)||123456789;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return((x>>>0)%1000000)/1000000}}
+function neutralColor(row,index){const n=(row*19+index*13)%21;if(n<8)return COLORS[0];if(n<13)return COLORS[1];if(n<18)return COLORS[2];return COLORS[3]}
 function positiveMod(n,m){return((n%m)+m)%m}
-
-function greenCountFor(row,seed){
- return 1+positiveMod(seed+row*5,GREEN_MAX);
-}
-
-function greenIndicesFor(row,seed){
- const count=PIECE_COUNTS[row];
- const wanted=Math.min(count,greenCountFor(row,seed));
- const indices=[];
- let cursor=positiveMod(seed*3+row*2,count);
- const step=count===8?3:2;
- while(indices.length<wanted){
-  if(!indices.includes(cursor))indices.push(cursor);
-  cursor=positiveMod(cursor+step,count);
- }
- return indices.sort((a,b)=>a-b);
-}
-
-function pieceColor(row,index,seed){
- return greenIndicesFor(row,seed).includes(index)?COLORS[4]:neutralColor(row,index);
-}
-
-function buildRowWidths(row,seed){
- const count=PIECE_COUNTS[row],min=2,remaining=COLS-count*min;
- const rnd=xorshift((seed+1)*7919+row*104729);
- const weights=[];let weightSum=0;
- for(let i=0;i<count;i++){
-  let w=0.3+Math.pow(rnd(),1.35)*1.6;
-  if(i===((seed+row*2)%count))w+=1.5;
-  weights.push(w);weightSum+=w;
- }
- const widths=weights.map(w=>min+Math.floor((w/weightSum)*remaining));
- let used=widths.reduce((a,b)=>a+b,0),cursor=(seed+row*3)%count;
- while(used<COLS){widths[cursor]+=1;used+=1;cursor=(cursor+3)%count}
- while(used>COLS){if(widths[cursor]>min){widths[cursor]-=1;used-=1}cursor=(cursor+2)%count}
- return widths;
-}
-
-function buildConfig(seed){
- const config=[];
- for(let row=0;row<ROWS;row++){
-  const widths=buildRowWidths(row,seed);let x=0;
-  config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index,seed)};x+=width;return p}));
- }
- return config;
-}
-
-function buildMask(timeStr){
- const mask=Array.from({length:ROWS},()=>Array(COLS).fill(0));
- let x=2;
- for(const ch of timeStr){
-  const glyph=FONT[ch];
-  for(let r=0;r<5;r++)for(let c=0;c<4;c++)if(glyph[r][c]==='1')mask[r+2][x+c]=1;
-  x+=5;
- }
- return mask;
-}
-
-function changedSlots(fromTime,toTime){
- const slots=[];
- for(let i=0;i<Math.min(fromTime.length,toTime.length);i++){
-  if(fromTime[i]===toTime[i])continue;
-  const start=2+i*5;
-  slots.push({index:i,start,end:start+3});
- }
- return slots;
-}
-
-function slotForCol(slots,col){
- for(const s of slots)if(col>=s.start&&col<=s.end)return s;
- return null;
-}
-
-function buildDiffRuns(oldMask,newMask,slots){
- const runs=[];
- for(let row=2;row<=6;row++){
-  let col=0;
-  while(col<COLS){
-   const slot=slotForCol(slots,col);
-   if(!slot||oldMask[row][col]===newMask[row][col]){col++;continue}
-   const type=newMask[row][col]===1?'cut':'fill';
-   const start=col;
-   while(col+1<=slot.end&&oldMask[row][col+1]!==newMask[row][col+1]&&(newMask[row][col+1]===1?'cut':'fill')===type)col++;
-   const end=col;
-   runs.push({row,start,end,type,center:(start+end+1)/2,slot});
-   col++;
-  }
- }
- return runs;
-}
-
+function greenCountFor(row,seed){return 1+positiveMod(seed+row*5,GREEN_MAX)}
+function greenIndicesFor(row,seed){const count=PIECE_COUNTS[row],wanted=Math.min(count,greenCountFor(row,seed)),indices=[];let cursor=positiveMod(seed*3+row*2,count);const step=count===8?3:2;while(indices.length<wanted){if(!indices.includes(cursor))indices.push(cursor);cursor=positiveMod(cursor+step,count)}return indices.sort((a,b)=>a-b)}
+function pieceColor(row,index,seed){return greenIndicesFor(row,seed).includes(index)?COLORS[4]:neutralColor(row,index)}
+function buildRowWidths(row,seed){const count=PIECE_COUNTS[row],min=2,remaining=COLS-count*min;const rnd=xorshift((seed+1)*7919+row*104729),weights=[];let weightSum=0;for(let i=0;i<count;i++){let w=0.3+Math.pow(rnd(),1.35)*1.6;if(i===((seed+row*2)%count))w+=1.5;weights.push(w);weightSum+=w}const widths=weights.map(w=>min+Math.floor((w/weightSum)*remaining));let used=widths.reduce((a,b)=>a+b,0),cursor=(seed+row*3)%count;while(used<COLS){widths[cursor]+=1;used+=1;cursor=(cursor+3)%count}while(used>COLS){if(widths[cursor]>min){widths[cursor]-=1;used-=1}cursor=(cursor+2)%count}return widths}
+function buildConfig(seed){const config=[];for(let row=0;row<ROWS;row++){const widths=buildRowWidths(row,seed);let x=0;config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index,seed)};x+=width;return p}))}return config}
+function buildMask(timeStr){const mask=Array.from({length:ROWS},()=>Array(COLS).fill(0));let x=2;for(const ch of timeStr){const glyph=FONT[ch];for(let r=0;r<5;r++)for(let c=0;c<4;c++)if(glyph[r][c]==='1')mask[r+2][x+c]=1;x+=5}return mask}
+function changedSlots(fromTime,toTime){const slots=[];for(let i=0;i<Math.min(fromTime.length,toTime.length);i++){if(fromTime[i]===toTime[i])continue;const start=2+i*5;slots.push({index:i,start,end:start+3})}return slots}
+function slotForCol(slots,col){for(const s of slots)if(col>=s.start&&col<=s.end)return s;return null}
+function buildDiffRuns(oldMask,newMask,slots){const runs=[];for(let row=2;row<=6;row++){let col=0;while(col<COLS){const slot=slotForCol(slots,col);if(!slot||oldMask[row][col]===newMask[row][col]){col++;continue}const type=newMask[row][col]===1?'cut':'fill',start=col;while(col+1<=slot.end&&oldMask[row][col+1]!==newMask[row][col+1]&&(newMask[row][col+1]===1?'cut':'fill')===type)col++;runs.push({row,start,end:col,type,center:(start+col+1)/2,slot});col++}}return runs}
 function ease(t){return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
-
-function rowY(row){
- const top=row*CELL_H+(row===0?0:GAP/2);
- const bottom=(row+1)*CELL_H-(row===ROWS-1?0:GAP/2);
- return{y:top,h:bottom-top};
-}
-
-function rowTarget(row,seed){
- return buildConfig(seed)[row].map(p=>({...p}));
-}
-
+function rowY(row){const top=row*CELL_H+(row===0?0:GAP/2),bottom=(row+1)*CELL_H-(row===ROWS-1?0:GAP/2);return{y:top,h:bottom-top}}
+function rowTarget(row,seed){return buildConfig(seed)[row].map(p=>({...p}))}
 function isGreen(piece){return piece&&piece.color===COLORS[4]}
-
-function greenSignature(rowPieces){
- const sig=[];
- for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))sig.push(i);
- return sig.join(',');
+function greenSignature(rowPieces){const sig=[];for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))sig.push(i);return sig.join(',')}
+function greenPieces(rowPieces){const result=[];for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))result.push({...rowPieces[i],index:i});return result.sort((a,b)=>(a.x+a.width/2)-(b.x+b.width/2))}
+function slicePiece(piece,ordinal,total){const width=piece.width/total;return{x:piece.x+ordinal*width,width}}
+function movingGreenPieces(transition,t){
+ const fromGreens=greenPieces(transition.from),toGreens=greenPieces(transition.to);
+ if(!fromGreens.length&&!toGreens.length)return[];
+ if(!fromGreens.length)return toGreens.map(p=>({...p}));
+ if(!toGreens.length)return fromGreens.map(p=>({...p}));
+ const trackCount=Math.max(fromGreens.length,toGreens.length),tracks=[];
+ for(let i=0;i<trackCount;i++)tracks.push({sourceIndex:Math.min(fromGreens.length-1,Math.floor(i*fromGreens.length/trackCount)),targetIndex:Math.min(toGreens.length-1,Math.floor(i*toGreens.length/trackCount))});
+ const sourceTotals=Array(fromGreens.length).fill(0),targetTotals=Array(toGreens.length).fill(0);
+ for(const track of tracks){sourceTotals[track.sourceIndex]++;targetTotals[track.targetIndex]++}
+ const sourceOrdinals=Array(fromGreens.length).fill(0),targetOrdinals=Array(toGreens.length).fill(0),et=ease(clamp(t,0,1)),result=[];
+ for(const track of tracks){const si=track.sourceIndex,ti=track.targetIndex;const source=slicePiece(fromGreens[si],sourceOrdinals[si]++,sourceTotals[si]),target=slicePiece(toGreens[ti],targetOrdinals[ti]++,targetTotals[ti]);result.push({x:source.x+(target.x-source.x)*et,width:source.width+(target.width-source.width)*et})}
+ return result;
 }
-
 function startRowRebuild(secondIndex){
  if(configTransition||KINETIC_ROWS.length===0)return;
- const row=KINETIC_ROWS[((secondIndex%KINETIC_ROWS.length)+KINETIC_ROWS.length)%KINETIC_ROWS.length];
- const from=currentConfig[row].map(p=>({...p}));
- let seed=currentSeed*97+secondIndex*31+row*17+1;
- let to=rowTarget(row,seed);
- const fromGreen=greenSignature(from);
- let attempts=0;
+ const now=performance.now();
+ if(rowTransition){if(now-rowTransition.start>=rowTransition.duration){currentConfig[rowTransition.row]=rowTransition.to;rowTransition=null}else return}
+ const row=KINETIC_ROWS[((secondIndex%KINETIC_ROWS.length)+KINETIC_ROWS.length)%KINETIC_ROWS.length],from=currentConfig[row].map(p=>({...p}));
+ let seed=currentSeed*97+secondIndex*31+row*17+1,to=rowTarget(row,seed);const fromGreen=greenSignature(from);let attempts=0;
  while(greenSignature(to)===fromGreen&&attempts<8){seed+=37;to=rowTarget(row,seed);attempts++}
- rowTransition={row,from,to,start:performance.now(),duration:ROW_TRANSITION_MS};
+ rowTransition={row,from,to,start:now,duration:ROW_TRANSITION_MS};
 }
-
-function interpPiece(a,b,t){
- return{x:a.x+(b.x-a.x)*t,width:a.width+(b.width-a.width)*t,color:t<0.5?a.color:b.color};
-}
-
-function greenPieces(rowPieces){
- const result=[];
- for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))result.push({...rowPieces[i],index:i});
- return result;
-}
-
-function movingGreenPieces(transition,t){
- const fromGreens=greenPieces(transition.from);
- const toGreens=greenPieces(transition.to);
- if(!toGreens.length)return[];
- const result=[];
- for(let i=0;i<toGreens.length;i++){
-  const target=toGreens[i];
-  const source=fromGreens.length?fromGreens[i%fromGreens.length]:null;
-  const sx=source?source.x+source.width/2:target.x+target.width/2;
-  const sw=source?Math.max(0.35,source.width/Math.ceil(toGreens.length/Math.max(1,fromGreens.length))):0.35;
-  const tx=target.x+target.width/2;
-  const tw=target.width;
-  const spreadDelay=Math.min(0.18,i*0.045);
-  const lt=clamp((t-spreadDelay)/(1-spreadDelay),0,1);
-  const et=ease(lt);
-  const center=sx+(tx-sx)*et;
-  const width=sw+(tw-sw)*et;
-  result.push({x:center-width/2,width});
- }
- return result;
-}
-
-function configState(now){
- if(!configTransition)return{from:currentConfig,to:null,t:1,raw:1};
- const raw=clamp((now-configTransition.start)/configTransition.duration,0,1);
- return{from:configTransition.from,to:configTransition.to,t:ease(raw),raw};
-}
-
-function rowState(row,now,cs){
- if(configTransition){const a=cs.from[row],b=cs.to[row];return{a,b,t:cs.t}}
- if(rowTransition&&row===rowTransition.row){
-  const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1);
-  return{a:rowTransition.from,b:rowTransition.to,t:ease(raw),rowRaw:raw};
- }
- const a=currentConfig[row];
- return{a,b:a,t:1};
-}
-
-function drawFieldBase(now){
- ctx.fillStyle=BOARD;ctx.fillRect(0,0,W,H);
- const cs=configState(now);
- let rowFinished=false;
- for(let row=0;row<ROWS;row++){
-  const rs=rowState(row,now,cs);
-  const {y,h}=rowY(row);
-  for(let i=0;i<rs.a.length;i++){
-   const p=interpPiece(rs.a[i],rs.b[i],rs.t);
-   const x=p.x*CELL_W+GAP/2;
-   const w=Math.max(1,p.width*CELL_W-GAP);
-   const movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;
-   ctx.fillStyle=movingRow?neutralColor(row,i):p.color;
-   ctx.fillRect(x,y,w,h);
-  }
-  if(rowTransition&&row===rowTransition.row&&rs.rowRaw>=1)rowFinished=true;
- }
- if(configTransition&&cs.raw>=1){currentConfig=configTransition.to;configTransition=null}
- if(rowFinished&&rowTransition){currentConfig[rowTransition.row]=rowTransition.to;rowTransition=null}
-}
-
-function localDeform(piece,row,slot,t,diffs){
- const center=piece.x+piece.width/2;
- let shift=0,scale=1;
- for(const d of diffs){
-  if(d.row!==row)continue;
-  const dist=Math.abs(center-d.center);
-  const radius=7.0;
-  if(dist>=radius)continue;
-  const delay=Math.min(0.34,(dist/radius)*0.34 + Math.abs(row-4)*0.025);
-  const lt=clamp((t-delay)/(1-delay),0,1);
-  const pulse=Math.sin(Math.PI*lt);
-  if(pulse<=0.0001)continue;
-  const influence=(1-dist/radius)*pulse;
-  const direction=center<d.center?-1:1;
-  if(d.type==='cut'){
-   shift+=direction*CELL_W*0.58*influence;
-   scale-=0.115*influence;
-  }else{
-   shift-=direction*CELL_W*0.48*influence;
-   scale+=0.090*influence;
-  }
- }
- const baseW=piece.width*CELL_W;
- const newW=Math.max(CELL_W*1.05,baseW*scale);
- const baseCenter=center*CELL_W;
- return{x:baseCenter+shift-newW/2,w:newW};
-}
-
-function pairBoundsForSlot(slot){
- if(slot.start<=10)return{start:2,end:10};
- if(slot.start<=25)return{start:17,end:25};
- return{start:32,end:40};
-}
-
-function drawChangedSlotsOverlay(now,transition,t){
- if(!transition||!transition.slots.length)return;
- const cs=configState(now);
- const groups=[];
- for(const slot of transition.slots){
-  const b=pairBoundsForSlot(slot);
-  if(!groups.some(g=>g.start===b.start&&g.end===b.end))groups.push(b);
- }
- for(const group of groups){
-  ctx.save();
-  const clipX=(group.start-0.20)*CELL_W;
-  const clipW=(group.end-group.start+1+0.40)*CELL_W;
-  ctx.beginPath();ctx.rect(clipX,2*CELL_H,clipW,5*CELL_H);ctx.clip();
-  for(let row=2;row<=6;row++){
-   const rs=rowState(row,now,cs);
-   const {y,h}=rowY(row);
-   for(let i=0;i<rs.a.length;i++){
-    const p=interpPiece(rs.a[i],rs.b[i],rs.t);
-    const d=localDeform(p,row,null,t,transition.runs);
-    const x=d.x+GAP/2;
-    const w=Math.max(1,d.w-GAP);
-    const movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;
-    ctx.fillStyle=movingRow?neutralColor(row,i):p.color;
-    ctx.fillRect(x,y,w,h);
-   }
-  }
-  ctx.restore();
- }
-}
-
-function drawMovingGreen(now){
- if(!rowTransition)return;
- const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1);
- const pieces=movingGreenPieces(rowTransition,raw);
- const row=rowTransition.row;
- const {y,h}=rowY(row);
- ctx.fillStyle=COLORS[4];
- for(const p of pieces){
-  const x=p.x*CELL_W+GAP/2;
-  const w=Math.max(1,p.width*CELL_W-GAP);
-  ctx.fillRect(x,y,w,h);
- }
-}
-
-function cutWholeMask(mask){
- ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
-}
-
-function cutStableMask(oldMask,newMask){
- ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(oldMask[row][col]&&newMask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
-}
-
-function drawDiffRuns(runs,t){
- ctx.fillStyle=BG;
- for(const r of runs){
-  const rowDelay=Math.abs(r.row-4)*0.035;
-  const lt=clamp((t-rowDelay)/(1-rowDelay),0,1);
-  const et=ease(lt);
-  const x=r.start*CELL_W;
-  const y=r.row*CELL_H;
-  const width=(r.end-r.start+1)*CELL_W;
-  if(r.type==='cut'){
-   const w=width*et;
-   ctx.fillRect(x+(width-w)/2,y,w+0.6,CELL_H+0.6);
-  }else{
-   const w=width*(1-et);
-   if(w>0.2)ctx.fillRect(x+(width-w)/2,y,w+0.6,CELL_H+0.6);
-  }
- }
-}
-
-function render(now){
- if(now-lastRender<FRAME_MS){requestAnimationFrame(render);return}
- lastRender=now;
- drawFieldBase(now);
- if(maskTransition){
-  const raw=clamp((now-maskTransition.start)/maskTransition.duration,0,1);
-  drawChangedSlotsOverlay(now,maskTransition,raw);
-  drawMovingGreen(now);
-  cutStableMask(maskTransition.from,maskTransition.to);
-  drawDiffRuns(maskTransition.runs,raw);
-  if(raw>=1){currentMask=maskTransition.to;maskTransition=null}
- }else{
-  drawMovingGreen(now);
-  cutWholeMask(currentMask);
- }
- requestAnimationFrame(render);
-}
-
-function melbourneParts(date){
- const parts=new Intl.DateTimeFormat('en-AU',{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
- let hh='00',mm='00',ss='00';
- for(const p of parts){if(p.type==='hour')hh=p.value;else if(p.type==='minute')mm=p.value;else if(p.type==='second')ss=p.value}
- return{hh,mm,ss};
-}
-
-function applyTime(timeStr,seed,allowMinuteMorph=true){
- const nextMask=buildMask(timeStr);
- const slots=changedSlots(currentTime,timeStr);
- const runs=buildDiffRuns(currentMask,nextMask,slots);
- if(runs.length){
-  maskTransition={from:currentMask,to:nextMask,runs,slots,start:performance.now(),duration:DIGIT_TRANSITION_MS};
- }else currentMask=nextMask;
- const minuteChanged=seed!==currentSeed;
- const hh=Number(timeStr.slice(0,2));
- const mm=Number(timeStr.slice(3,5));
- const ss=Number(timeStr.slice(6,8));
- const absoluteSecond=hh*3600+mm*60+ss;
- if(ROW_MODE==='all'){
-  if(minuteChanged)currentSeed=seed;
-  startRowRebuild(absoluteSecond);
- }else if(minuteChanged){
-  rowTransition=null;
-  if(allowMinuteMorph)configTransition={from:currentConfig,to:buildConfig(seed),start:performance.now(),duration:MINUTE_TRANSITION_MS};
-  else currentConfig=buildConfig(seed);
-  currentSeed=seed;
- }else{
-  startRowRebuild(absoluteSecond);
- }
- currentTime=timeStr;
-}
-
-function liveTick(){
- const p=melbourneParts(new Date());
- const str=`${p.hh}:${p.mm}:${p.ss}`;
- const seed=Number(p.hh)*60+Number(p.mm);
- applyTime(str,seed,true);
- tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20));
-}
-
-function demoTick(){
- demoSeconds=(demoSeconds+1)%(24*3600);demoTickCount++;
- const hh=String(Math.floor(demoSeconds/3600)%24).padStart(2,'0');
- const mm=String(Math.floor(demoSeconds/60)%60).padStart(2,'0');
- const ss=String(demoSeconds%60).padStart(2,'0');
- const seed=Number(hh)*60+Number(mm);
- applyTime(`${hh}:${mm}:${ss}`,seed,true);
- tickTimer=setTimeout(demoTick,1000);
-}
-
-function initialise(){
- scaleStage();
- if(PREVIEW_FROM&&PREVIEW_TO){
-  currentTime=PREVIEW_FROM;currentMask=buildMask(PREVIEW_FROM);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed);
-  const nextMask=buildMask(PREVIEW_TO);
-  const slots=changedSlots(PREVIEW_FROM,PREVIEW_TO);
-  const runs=buildDiffRuns(currentMask,nextMask,slots);
-  const now=performance.now();
-  maskTransition={from:currentMask,to:nextMask,runs,slots,start:now-PREVIEW_T*DIGIT_TRANSITION_MS,duration:DIGIT_TRANSITION_MS};
-  const target=rowTarget(PREVIEW_ROW,currentSeed*97+99+PREVIEW_ROW*17);
-  rowTransition={row:PREVIEW_ROW,from:currentConfig[PREVIEW_ROW].map(p=>({...p})),to:target,start:now-PREVIEW_T*ROW_TRANSITION_MS,duration:ROW_TRANSITION_MS};
- }else if(FIXED_TIME){
-  currentTime=FIXED_TIME;currentMask=buildMask(FIXED_TIME);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed);
- }else{
-  const p=melbourneParts(new Date());
-  currentTime=`${p.hh}:${p.mm}:${p.ss}`;currentMask=buildMask(currentTime);currentSeed=Number(p.hh)*60+Number(p.mm);currentConfig=buildConfig(currentSeed);
-  if(DEMO)tickTimer=setTimeout(demoTick,700);else tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20));
- }
- requestAnimationFrame(render);
-}
-
-addEventListener('resize',scaleStage,{passive:true});
-addEventListener('orientationchange',scaleStage,{passive:true});
-document.addEventListener('visibilitychange',()=>{
- if(!document.hidden&&!FIXED_TIME&&!DEMO){clearTimeout(tickTimer);liveTick()}
-});
-initialise();
+function interpPiece(a,b,t){return{x:a.x+(b.x-a.x)*t,width:a.width+(b.width-a.width)*t,color:t<0.5?a.color:b.color}}
+function configState(now){if(!configTransition)return{from:currentConfig,to:null,t:1,raw:1};const raw=clamp((now-configTransition.start)/configTransition.duration,0,1);return{from:configTransition.from,to:configTransition.to,t:ease(raw),raw}}
+function rowState(row,now,cs){if(configTransition){return{a:cs.from[row],b:cs.to[row],t:cs.t}}if(rowTransition&&row===rowTransition.row){const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1);return{a:rowTransition.from,b:rowTransition.to,t:ease(raw),rowRaw:raw}}const a=currentConfig[row];return{a,b:a,t:1}}
+function drawFieldBase(now){ctx.fillStyle=BOARD;ctx.fillRect(0,0,W,H);const cs=configState(now);let rowFinished=false;for(let row=0;row<ROWS;row++){const rs=rowState(row,now,cs),{y,h}=rowY(row);for(let i=0;i<rs.a.length;i++){const p=interpPiece(rs.a[i],rs.b[i],rs.t),x=p.x*CELL_W+GAP/2,w=Math.max(1,p.width*CELL_W-GAP);const movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;ctx.fillStyle=movingRow?neutralColor(row,i):p.color;ctx.fillRect(x,y,w,h)}if(rowTransition&&row===rowTransition.row&&rs.rowRaw>=1)rowFinished=true}if(configTransition&&cs.raw>=1){currentConfig=configTransition.to;configTransition=null}if(rowFinished&&rowTransition){currentConfig[rowTransition.row]=rowTransition.to;rowTransition=null}}
+function localDeform(piece,row,t,diffs){const center=piece.x+piece.width/2;let shift=0,scale=1;for(const d of diffs){if(d.row!==row)continue;const dist=Math.abs(center-d.center),radius=7;if(dist>=radius)continue;const delay=Math.min(0.34,(dist/radius)*0.34+Math.abs(row-4)*0.025),lt=clamp((t-delay)/(1-delay),0,1),pulse=Math.sin(Math.PI*lt);if(pulse<=0.0001)continue;const influence=(1-dist/radius)*pulse,direction=center<d.center?-1:1;if(d.type==='cut'){shift+=direction*CELL_W*0.58*influence;scale-=0.115*influence}else{shift-=direction*CELL_W*0.48*influence;scale+=0.09*influence}}const baseW=piece.width*CELL_W,newW=Math.max(CELL_W*1.05,baseW*scale),baseCenter=center*CELL_W;return{x:baseCenter+shift-newW/2,w:newW}}
+function pairBoundsForSlot(slot){if(slot.start<=10)return{start:2,end:10};if(slot.start<=25)return{start:17,end:25};return{start:32,end:40}}
+function drawChangedSlotsOverlay(now,transition,t){if(!transition||!transition.slots.length)return;const cs=configState(now),groups=[];for(const slot of transition.slots){const b=pairBoundsForSlot(slot);if(!groups.some(g=>g.start===b.start&&g.end===b.end))groups.push(b)}for(const group of groups){ctx.save();const clipX=(group.start-.2)*CELL_W,clipW=(group.end-group.start+1.4)*CELL_W;ctx.beginPath();ctx.rect(clipX,2*CELL_H,clipW,5*CELL_H);ctx.clip();for(let row=2;row<=6;row++){const rs=rowState(row,now,cs),{y,h}=rowY(row);for(let i=0;i<rs.a.length;i++){const p=interpPiece(rs.a[i],rs.b[i],rs.t),d=localDeform(p,row,t,transition.runs),x=d.x+GAP/2,w=Math.max(1,d.w-GAP),movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;ctx.fillStyle=movingRow?neutralColor(row,i):p.color;ctx.fillRect(x,y,w,h)}}ctx.restore()}}
+function drawMovingGreen(now){if(!rowTransition)return;const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1),pieces=movingGreenPieces(rowTransition,raw),{y,h}=rowY(rowTransition.row);ctx.fillStyle=COLORS[4];for(const p of pieces){const x=p.x*CELL_W+GAP/2,w=Math.max(1,p.width*CELL_W-GAP);ctx.fillRect(x,y,w,h)}}
+function cutWholeMask(mask){ctx.fillStyle=BG;for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+.6,CELL_H+.6)}
+function cutStableMask(oldMask,newMask){ctx.fillStyle=BG;for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(oldMask[row][col]&&newMask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+.6,CELL_H+.6)}
+function drawDiffRuns(runs,t){ctx.fillStyle=BG;for(const r of runs){const rowDelay=Math.abs(r.row-4)*.035,lt=clamp((t-rowDelay)/(1-rowDelay),0,1),et=ease(lt),x=r.start*CELL_W,y=r.row*CELL_H,width=(r.end-r.start+1)*CELL_W;if(r.type==='cut'){const w=width*et;ctx.fillRect(x+(width-w)/2,y,w+.6,CELL_H+.6)}else{const w=width*(1-et);if(w>.2)ctx.fillRect(x+(width-w)/2,y,w+.6,CELL_H+.6)}}}
+function render(now){if(now-lastRender<FRAME_MS){requestAnimationFrame(render);return}lastRender=now;drawFieldBase(now);if(maskTransition){const raw=clamp((now-maskTransition.start)/maskTransition.duration,0,1);drawChangedSlotsOverlay(now,maskTransition,raw);drawMovingGreen(now);cutStableMask(maskTransition.from,maskTransition.to);drawDiffRuns(maskTransition.runs,raw);if(raw>=1){currentMask=maskTransition.to;maskTransition=null}}else{drawMovingGreen(now);cutWholeMask(currentMask)}requestAnimationFrame(render)}
+function melbourneParts(date){const parts=new Intl.DateTimeFormat('en-AU',{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);let hh='00',mm='00',ss='00';for(const p of parts){if(p.type==='hour')hh=p.value;else if(p.type==='minute')mm=p.value;else if(p.type==='second')ss=p.value}return{hh,mm,ss}}
+function applyTime(timeStr,seed,allowMinuteMorph=true){const nextMask=buildMask(timeStr),slots=changedSlots(currentTime,timeStr),runs=buildDiffRuns(currentMask,nextMask,slots);if(runs.length)maskTransition={from:currentMask,to:nextMask,runs,slots,start:performance.now(),duration:DIGIT_TRANSITION_MS};else currentMask=nextMask;const minuteChanged=seed!==currentSeed,hh=Number(timeStr.slice(0,2)),mm=Number(timeStr.slice(3,5)),ss=Number(timeStr.slice(6,8)),absoluteSecond=hh*3600+mm*60+ss;if(ROW_MODE==='all'){if(minuteChanged)currentSeed=seed;startRowRebuild(absoluteSecond)}else if(minuteChanged){rowTransition=null;if(allowMinuteMorph)configTransition={from:currentConfig,to:buildConfig(seed),start:performance.now(),duration:MINUTE_TRANSITION_MS};else currentConfig=buildConfig(seed);currentSeed=seed}else startRowRebuild(absoluteSecond);currentTime=timeStr}
+function liveTick(){const p=melbourneParts(new Date()),str=`${p.hh}:${p.mm}:${p.ss}`,seed=Number(p.hh)*60+Number(p.mm);applyTime(str,seed,true);tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20))}
+function demoTick(){demoSeconds=(demoSeconds+1)%(24*3600);const hh=String(Math.floor(demoSeconds/3600)%24).padStart(2,'0'),mm=String(Math.floor(demoSeconds/60)%60).padStart(2,'0'),ss=String(demoSeconds%60).padStart(2,'0'),seed=Number(hh)*60+Number(mm);applyTime(`${hh}:${mm}:${ss}`,seed,true);tickTimer=setTimeout(demoTick,1000)}
+function initialise(){scaleStage();if(PREVIEW_FROM&&PREVIEW_TO){currentTime=PREVIEW_FROM;currentMask=buildMask(PREVIEW_FROM);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed);const nextMask=buildMask(PREVIEW_TO),slots=changedSlots(PREVIEW_FROM,PREVIEW_TO),runs=buildDiffRuns(currentMask,nextMask,slots),now=performance.now();maskTransition={from:currentMask,to:nextMask,runs,slots,start:now-PREVIEW_T*DIGIT_TRANSITION_MS,duration:DIGIT_TRANSITION_MS};const target=rowTarget(PREVIEW_ROW,currentSeed*97+99+PREVIEW_ROW*17);rowTransition={row:PREVIEW_ROW,from:currentConfig[PREVIEW_ROW].map(p=>({...p})),to:target,start:now-PREVIEW_T*ROW_TRANSITION_MS,duration:ROW_TRANSITION_MS}}else if(FIXED_TIME){currentTime=FIXED_TIME;currentMask=buildMask(FIXED_TIME);currentSeed=FIXED_SEED??0;currentConfig=buildConfig(currentSeed)}else{const p=melbourneParts(new Date());currentTime=`${p.hh}:${p.mm}:${p.ss}`;currentMask=buildMask(currentTime);currentSeed=Number(p.hh)*60+Number(p.mm);currentConfig=buildConfig(currentSeed);if(DEMO)tickTimer=setTimeout(demoTick,700);else tickTimer=setTimeout(liveTick,Math.max(50,1000-(Date.now()%1000)+20))}requestAnimationFrame(render)}
+addEventListener('resize',scaleStage,{passive:true});addEventListener('orientationchange',scaleStage,{passive:true});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!FIXED_TIME&&!DEMO){clearTimeout(tickTimer);liveTick()}});initialise();
 })();
 </script>
 </body>
