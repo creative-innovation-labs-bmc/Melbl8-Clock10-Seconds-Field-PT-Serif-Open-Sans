@@ -41,8 +41,10 @@ const FONT={
 const PIECE_COUNTS=[7,8,7,8,7,8,7,8,7];
 
 // Event-driven kinetic system: each second creates a pressure ripple in the
-// changing time zone, while one outer architectural row slowly rebuilds.
-const KINETIC_ROWS=[0,1,8,7];
+// changing time zone, while one architectural row rebuilds. The default
+// all-row mode cycles 0→8 continuously, top to bottom.
+const ALL_KINETIC_ROWS=[0,1,2,3,4,5,6,7,8];
+const OUTER_KINETIC_ROWS=[0,1,8,7];
 const FRAME_MS=1000/30;
 const DIGIT_TRANSITION_MS=900;
 const ROW_TRANSITION_MS=920;
@@ -62,6 +64,8 @@ const PREVIEW_FROM=/^\d{2}:\d{2}:\d{2}$/.test(params.get('from')||'')?params.get
 const PREVIEW_TO=/^\d{2}:\d{2}:\d{2}$/.test(params.get('to')||'')?params.get('to'):null;
 const PREVIEW_T=Math.max(0,Math.min(1,Number(params.get('t'))||0));
 const PREVIEW_ROW=Number.isFinite(Number(params.get('row')))?Math.max(0,Math.min(8,Number(params.get('row')))):0;
+const ROW_MODE=(params.get('rows')||'all').toLowerCase();
+const KINETIC_ROWS=ROW_MODE==='outer'?OUTER_KINETIC_ROWS:(ROW_MODE==='none'?[]:ALL_KINETIC_ROWS);
 
 let currentTime='00:00:00';
 let currentMask=buildMask(currentTime);
@@ -181,8 +185,8 @@ function rowTarget(row,seed){
 }
 
 function startRowRebuild(secondIndex){
- if(configTransition)return;
- const row=KINETIC_ROWS[secondIndex%KINETIC_ROWS.length];
+ if(configTransition||KINETIC_ROWS.length===0)return;
+ const row=KINETIC_ROWS[((secondIndex%KINETIC_ROWS.length)+KINETIC_ROWS.length)%KINETIC_ROWS.length];
  const from=currentConfig[row].map(p=>({...p}));
  const seed=currentSeed*97+secondIndex*31+row*17+1;
  const to=rowTarget(row,seed);
@@ -190,7 +194,11 @@ function startRowRebuild(secondIndex){
 }
 
 function interpPiece(a,b,t){
- return{x:a.x+(b.x-a.x)*t,width:a.width+(b.width-a.width)*t,color:a.color};
+ return{
+  x:a.x+(b.x-a.x)*t,
+  width:a.width+(b.width-a.width)*t,
+  color:a.color
+ };
 }
 
 function configState(now){
@@ -239,6 +247,7 @@ function localDeform(piece,row,slot,t,diffs){
   const dist=Math.abs(center-d.center);
   const radius=7.0;
   if(dist>=radius)continue;
+  // Distance delays the reaction, producing a visible pressure wave.
   const delay=Math.min(0.34,(dist/radius)*0.34 + Math.abs(row-4)*0.025);
   const lt=clamp((t-delay)/(1-delay),0,1);
   const pulse=Math.sin(Math.PI*lt);
@@ -260,6 +269,7 @@ function localDeform(piece,row,slot,t,diffs){
 }
 
 function pairBoundsForSlot(slot){
+ // HH = columns 2..10, MM = 17..25, SS = 32..40. Colons remain fixed.
  if(slot.start<=10)return{start:2,end:10};
  if(slot.start<=25)return{start:17,end:25};
  return{start:32,end:40};
@@ -275,6 +285,7 @@ function drawChangedSlotsOverlay(now,transition,t){
  }
  for(const group of groups){
   ctx.save();
+  // Hard clip prevents a seconds ripple from touching MM or HH.
   const clipX=(group.start-0.20)*CELL_W;
   const clipW=(group.end-group.start+1+0.40)*CELL_W;
   ctx.beginPath();ctx.rect(clipX,2*CELL_H,clipW,5*CELL_H);ctx.clip();
@@ -355,14 +366,22 @@ function applyTime(timeStr,seed,allowMinuteMorph=true){
   maskTransition={from:currentMask,to:nextMask,runs,slots,start:performance.now(),duration:DIGIT_TRANSITION_MS};
  }else currentMask=nextMask;
  const minuteChanged=seed!==currentSeed;
- if(minuteChanged){
+ const hh=Number(timeStr.slice(0,2));
+ const mm=Number(timeStr.slice(3,5));
+ const ss=Number(timeStr.slice(6,8));
+ const absoluteSecond=hh*3600+mm*60+ss;
+ if(ROW_MODE==='all'){
+  // In all-row mode, preserve the one-row-per-second rule even at the minute.
+  // The new minute updates the seed, then exactly one row continues the 0→8 cycle.
+  if(minuteChanged)currentSeed=seed;
+  startRowRebuild(absoluteSecond);
+ }else if(minuteChanged){
   rowTransition=null;
   if(allowMinuteMorph)configTransition={from:currentConfig,to:buildConfig(seed),start:performance.now(),duration:MINUTE_TRANSITION_MS};
   else currentConfig=buildConfig(seed);
   currentSeed=seed;
  }else{
-  const sec=Number(timeStr.slice(6,8));
-  startRowRebuild(sec);
+  startRowRebuild(absoluteSecond);
  }
  currentTime=timeStr;
 }
