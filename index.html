@@ -39,10 +39,6 @@ const FONT={
  ':':['0000','0110','0000','0110','0000']
 };
 const PIECE_COUNTS=[7,8,7,8,7,8,7,8,7];
-
-// Event-driven kinetic system: each second creates a pressure ripple in the
-// changing time zone, while one architectural row rebuilds. The default
-// all-row mode cycles 0→8 continuously, top to bottom.
 const ALL_KINETIC_ROWS=[0,1,2,3,4,5,6,7,8];
 const OUTER_KINETIC_ROWS=[0,1,8,7];
 const FRAME_MS=1000/30;
@@ -66,6 +62,7 @@ const PREVIEW_T=Math.max(0,Math.min(1,Number(params.get('t'))||0));
 const PREVIEW_ROW=Number.isFinite(Number(params.get('row')))?Math.max(0,Math.min(8,Number(params.get('row')))):0;
 const ROW_MODE=(params.get('rows')||'all').toLowerCase();
 const KINETIC_ROWS=ROW_MODE==='outer'?OUTER_KINETIC_ROWS:(ROW_MODE==='none'?[]:ALL_KINETIC_ROWS);
+const GREEN_MAX=Math.max(1,Math.min(4,parseInt(params.get('green')||'3',10)||3));
 
 let currentTime='00:00:00';
 let currentMask=buildMask(currentTime);
@@ -93,13 +90,35 @@ function xorshift(seed){
  return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return((x>>>0)%1000000)/1000000};
 }
 
-function pieceColor(row,index){
- const n=(row*19+index*13)%25;
- if(n===0||n===11)return COLORS[4];
- if(n<10)return COLORS[0];
- if(n<16)return COLORS[1];
- if(n<21)return COLORS[2];
+function neutralColor(row,index){
+ const n=(row*19+index*13)%21;
+ if(n<8)return COLORS[0];
+ if(n<13)return COLORS[1];
+ if(n<18)return COLORS[2];
  return COLORS[3];
+}
+
+function positiveMod(n,m){return((n%m)+m)%m}
+
+function greenCountFor(row,seed){
+ return 1+positiveMod(seed+row*5,GREEN_MAX);
+}
+
+function greenIndicesFor(row,seed){
+ const count=PIECE_COUNTS[row];
+ const wanted=Math.min(count,greenCountFor(row,seed));
+ const indices=[];
+ let cursor=positiveMod(seed*3+row*2,count);
+ const step=count===8?3:2;
+ while(indices.length<wanted){
+  if(!indices.includes(cursor))indices.push(cursor);
+  cursor=positiveMod(cursor+step,count);
+ }
+ return indices.sort((a,b)=>a-b);
+}
+
+function pieceColor(row,index,seed){
+ return greenIndicesFor(row,seed).includes(index)?COLORS[4]:neutralColor(row,index);
 }
 
 function buildRowWidths(row,seed){
@@ -122,7 +141,7 @@ function buildConfig(seed){
  const config=[];
  for(let row=0;row<ROWS;row++){
   const widths=buildRowWidths(row,seed);let x=0;
-  config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index)};x+=width;return p}));
+  config.push(widths.map((width,index)=>{const p={x,width,color:pieceColor(row,index,seed)};x+=width;return p}));
  }
  return config;
 }
@@ -184,21 +203,56 @@ function rowTarget(row,seed){
  return buildConfig(seed)[row].map(p=>({...p}));
 }
 
+function isGreen(piece){return piece&&piece.color===COLORS[4]}
+
+function greenSignature(rowPieces){
+ const sig=[];
+ for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))sig.push(i);
+ return sig.join(',');
+}
+
 function startRowRebuild(secondIndex){
  if(configTransition||KINETIC_ROWS.length===0)return;
  const row=KINETIC_ROWS[((secondIndex%KINETIC_ROWS.length)+KINETIC_ROWS.length)%KINETIC_ROWS.length];
  const from=currentConfig[row].map(p=>({...p}));
- const seed=currentSeed*97+secondIndex*31+row*17+1;
- const to=rowTarget(row,seed);
+ let seed=currentSeed*97+secondIndex*31+row*17+1;
+ let to=rowTarget(row,seed);
+ const fromGreen=greenSignature(from);
+ let attempts=0;
+ while(greenSignature(to)===fromGreen&&attempts<8){seed+=37;to=rowTarget(row,seed);attempts++}
  rowTransition={row,from,to,start:performance.now(),duration:ROW_TRANSITION_MS};
 }
 
 function interpPiece(a,b,t){
- return{
-  x:a.x+(b.x-a.x)*t,
-  width:a.width+(b.width-a.width)*t,
-  color:a.color
- };
+ return{x:a.x+(b.x-a.x)*t,width:a.width+(b.width-a.width)*t,color:t<0.5?a.color:b.color};
+}
+
+function greenPieces(rowPieces){
+ const result=[];
+ for(let i=0;i<rowPieces.length;i++)if(isGreen(rowPieces[i]))result.push({...rowPieces[i],index:i});
+ return result;
+}
+
+function movingGreenPieces(transition,t){
+ const fromGreens=greenPieces(transition.from);
+ const toGreens=greenPieces(transition.to);
+ if(!toGreens.length)return[];
+ const result=[];
+ for(let i=0;i<toGreens.length;i++){
+  const target=toGreens[i];
+  const source=fromGreens.length?fromGreens[i%fromGreens.length]:null;
+  const sx=source?source.x+source.width/2:target.x+target.width/2;
+  const sw=source?Math.max(0.35,source.width/Math.ceil(toGreens.length/Math.max(1,fromGreens.length))):0.35;
+  const tx=target.x+target.width/2;
+  const tw=target.width;
+  const spreadDelay=Math.min(0.18,i*0.045);
+  const lt=clamp((t-spreadDelay)/(1-spreadDelay),0,1);
+  const et=ease(lt);
+  const center=sx+(tx-sx)*et;
+  const width=sw+(tw-sw)*et;
+  result.push({x:center-width/2,width});
+ }
+ return result;
 }
 
 function configState(now){
@@ -208,10 +262,7 @@ function configState(now){
 }
 
 function rowState(row,now,cs){
- if(configTransition){
-  const a=cs.from[row],b=cs.to[row];
-  return{a,b,t:cs.t};
- }
+ if(configTransition){const a=cs.from[row],b=cs.to[row];return{a,b,t:cs.t}}
  if(rowTransition&&row===rowTransition.row){
   const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1);
   return{a:rowTransition.from,b:rowTransition.to,t:ease(raw),rowRaw:raw};
@@ -231,7 +282,9 @@ function drawFieldBase(now){
    const p=interpPiece(rs.a[i],rs.b[i],rs.t);
    const x=p.x*CELL_W+GAP/2;
    const w=Math.max(1,p.width*CELL_W-GAP);
-   ctx.fillStyle=p.color;ctx.fillRect(x,y,w,h);
+   const movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;
+   ctx.fillStyle=movingRow?neutralColor(row,i):p.color;
+   ctx.fillRect(x,y,w,h);
   }
   if(rowTransition&&row===rowTransition.row&&rs.rowRaw>=1)rowFinished=true;
  }
@@ -247,7 +300,6 @@ function localDeform(piece,row,slot,t,diffs){
   const dist=Math.abs(center-d.center);
   const radius=7.0;
   if(dist>=radius)continue;
-  // Distance delays the reaction, producing a visible pressure wave.
   const delay=Math.min(0.34,(dist/radius)*0.34 + Math.abs(row-4)*0.025);
   const lt=clamp((t-delay)/(1-delay),0,1);
   const pulse=Math.sin(Math.PI*lt);
@@ -269,7 +321,6 @@ function localDeform(piece,row,slot,t,diffs){
 }
 
 function pairBoundsForSlot(slot){
- // HH = columns 2..10, MM = 17..25, SS = 32..40. Colons remain fixed.
  if(slot.start<=10)return{start:2,end:10};
  if(slot.start<=25)return{start:17,end:25};
  return{start:32,end:40};
@@ -285,7 +336,6 @@ function drawChangedSlotsOverlay(now,transition,t){
  }
  for(const group of groups){
   ctx.save();
-  // Hard clip prevents a seconds ripple from touching MM or HH.
   const clipX=(group.start-0.20)*CELL_W;
   const clipW=(group.end-group.start+1+0.40)*CELL_W;
   ctx.beginPath();ctx.rect(clipX,2*CELL_H,clipW,5*CELL_H);ctx.clip();
@@ -297,25 +347,37 @@ function drawChangedSlotsOverlay(now,transition,t){
     const d=localDeform(p,row,null,t,transition.runs);
     const x=d.x+GAP/2;
     const w=Math.max(1,d.w-GAP);
-    ctx.fillStyle=p.color;ctx.fillRect(x,y,w,h);
+    const movingRow=rowTransition&&row===rowTransition.row&&rs.rowRaw<1;
+    ctx.fillStyle=movingRow?neutralColor(row,i):p.color;
+    ctx.fillRect(x,y,w,h);
    }
   }
   ctx.restore();
  }
 }
 
+function drawMovingGreen(now){
+ if(!rowTransition)return;
+ const raw=clamp((now-rowTransition.start)/rowTransition.duration,0,1);
+ const pieces=movingGreenPieces(rowTransition,raw);
+ const row=rowTransition.row;
+ const {y,h}=rowY(row);
+ ctx.fillStyle=COLORS[4];
+ for(const p of pieces){
+  const x=p.x*CELL_W+GAP/2;
+  const w=Math.max(1,p.width*CELL_W-GAP);
+  ctx.fillRect(x,y,w,h);
+ }
+}
+
 function cutWholeMask(mask){
  ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col]){
-  ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
- }
+ for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(mask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
 }
 
 function cutStableMask(oldMask,newMask){
  ctx.fillStyle=BG;
- for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(oldMask[row][col]&&newMask[row][col]){
-  ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
- }
+ for(let row=0;row<ROWS;row++)for(let col=0;col<COLS;col++)if(oldMask[row][col]&&newMask[row][col])ctx.fillRect(col*CELL_W,row*CELL_H,CELL_W+0.6,CELL_H+0.6);
 }
 
 function drawDiffRuns(runs,t){
@@ -344,10 +406,14 @@ function render(now){
  if(maskTransition){
   const raw=clamp((now-maskTransition.start)/maskTransition.duration,0,1);
   drawChangedSlotsOverlay(now,maskTransition,raw);
+  drawMovingGreen(now);
   cutStableMask(maskTransition.from,maskTransition.to);
   drawDiffRuns(maskTransition.runs,raw);
   if(raw>=1){currentMask=maskTransition.to;maskTransition=null}
- }else cutWholeMask(currentMask);
+ }else{
+  drawMovingGreen(now);
+  cutWholeMask(currentMask);
+ }
  requestAnimationFrame(render);
 }
 
@@ -371,8 +437,6 @@ function applyTime(timeStr,seed,allowMinuteMorph=true){
  const ss=Number(timeStr.slice(6,8));
  const absoluteSecond=hh*3600+mm*60+ss;
  if(ROW_MODE==='all'){
-  // In all-row mode, preserve the one-row-per-second rule even at the minute.
-  // The new minute updates the seed, then exactly one row continues the 0→8 cycle.
   if(minuteChanged)currentSeed=seed;
   startRowRebuild(absoluteSecond);
  }else if(minuteChanged){
